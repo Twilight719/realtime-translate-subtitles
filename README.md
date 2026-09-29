@@ -1,5 +1,7 @@
 # 实时翻译字幕（Realtime Translate Subtitles）
 
+简体中文 | [English](README_EN.md)
+
 Windows 桌面实时翻译字幕工具：监听电脑播放的声音（视频、游戏、会议），实时语音识别 + 翻译，以悬浮字幕条显示在屏幕上。
 
 ## 功能特性
