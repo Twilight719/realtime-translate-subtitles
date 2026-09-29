@@ -1,0 +1,15 @@
+# Python / 虚拟环境
+.venv/
+__pycache__/
+*.pyc
+
+# 模型文件（首次运行自动下载，不入库）
+models/
+
+# 本地配置（含 API key，勿上传）与日志
+config.yaml
+*.log
+
+# PyInstaller 产物
+build/
+dist/

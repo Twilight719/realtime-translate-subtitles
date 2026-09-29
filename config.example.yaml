@@ -1,0 +1,51 @@
+# 实时翻译字幕配置（模板：复制为 config.yaml 后按需修改）
+
+audio:
+  device_name:             # null = 默认扬声器 loopback；也可填 audio_capture.py 自测列出的设备名
+
+whisper:
+  model_size: small        # tiny / base / small / medium
+  device: cuda             # cuda / cpu
+  compute_type: float16    # cuda 用 float16；cpu 建议 int8
+  beam_size: 1             # 1 = 最快；提到 3~5 质量略好但更慢
+
+vad:
+  threshold: 0.5
+  min_speech_ms: 250
+  min_silence_ms: 400
+  max_segment_s: 10        # 连续说话时每段最长秒数（强制切段）
+  partial_interval_s: 1.5  # 说话过程中每隔多少秒出一次实时快照字幕（调小更跟手，翻译请求更频繁）
+
+language:
+  source: auto             # 源语言：auto=自动检测；看单一语言视频可锁定 zh/en/ja/ko/ru，识别更快更准
+  target: zh               # 目标语言：zh/en/ja/ko/ru
+
+translator:
+  order:                               # 排前面优先，失败自动回退下一个
+                                      # 可选 youdao_web / mymemory / google_web / llm_api / nllb
+                                      # google_web 需要能访问 Google 的网络
+  - youdao_web
+  - nllb
+  - mymemory
+  nllb_device: cpu            # 本地 NLLB 默认 CPU，不占显存
+  llm_api:
+    base_url: https://api.deepseek.com/v1
+    api_key: ""             # 填 key 后在 order 里加 llm_api 即启用
+    model: deepseek-chat
+    context_size: 1
+
+subtitle:
+  width: 700
+  font_size: 22
+  fade_ms: 5000            # 无新字幕多少毫秒后淡出
+  click_through: true      # true=点击穿透（不影响游戏）；false=可拖动位置
+  x: 300
+  y: 800
+  bg_alpha: 140
+  zh_color: '#FFE34D'
+  src_color: '#FFFFFF'
+
+ui:
+  font_size: 13            # 设置界面字体大小（10~22），改大后窗口可手动拉大
+
+hotkey: alt+t              # 全局启停快捷键

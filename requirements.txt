@@ -1,0 +1,14 @@
+faster-whisper>=1.0
+ctranslate2>=4.0
+nvidia-cublas-cu12
+nvidia-cudnn-cu12
+onnxruntime>=1.17
+soundcard>=0.4
+numpy
+scipy
+sentencepiece
+PyQt5>=5.15
+PyYAML>=6.0
+ruamel.yaml>=0.18
+deep-translator>=1.11
+requests>=2.31

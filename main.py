@@ -1,0 +1,543 @@
+"""入口：装配音频捕获 → VAD → whisper → 翻译 → 字幕窗，含快捷键与托盘。"""
+
+import os
+import queue
+import sys
+import threading
+import time
+
+from ruamel.yaml import YAML
+
+from app.paths import base_dir, resource_path
+
+BASE_DIR = base_dir()  # 打包后为 exe 所在目录，开发时为项目根目录
+CONFIG_PATH = os.path.join(BASE_DIR, "config.yaml")
+LOG_PATH = os.path.join(BASE_DIR, "app.log")
+
+# HuggingFace 直连不通时走国内镜像（须在 huggingface_hub 被导入前设置）
+os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
+# xet 下载通道在国内鉴权不稳定，禁用后走普通 CDN
+os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
+
+# onnxruntime/faster-whisper 必须先于 PyQt5 导入，否则 Windows 下加载原生 DLL 会崩溃
+import onnxruntime  # noqa: F401
+import faster_whisper  # noqa: F401
+
+# 让 ctranslate2 找到 pip 安装的 cuBLAS/cuDNN DLL（GPU 推理必需）。
+# 直接用完整路径预加载，之后 ctranslate2 按名称 LoadLibrary 即可命中已加载模块。
+import ctypes as _ctypes
+import glob as _glob
+
+_cuda_roots = [
+    os.path.join(sys.prefix, "Lib", "site-packages"),  # 开发环境（venv）
+    getattr(sys, "_MEIPASS", sys.prefix),              # PyInstaller 打包后：_internal/nvidia/*/bin
+]
+for _root in dict.fromkeys(_cuda_roots):
+    for _d in _glob.glob(os.path.join(_root, "nvidia", "*", "bin")):
+        for _dll in sorted(_glob.glob(os.path.join(_d, "*.dll"))):
+            try:
+                _ctypes.CDLL(_dll)
+            except OSError:
+                pass
+
+from PyQt5.QtCore import QObject, QCoreApplication, pyqtSignal
+from PyQt5.QtGui import QIcon
+from PyQt5.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
+
+# Qt 5.15 在中文路径下会把插件目录错算成 "????"，需显式注册插件路径
+import PyQt5 as _PyQt5
+
+QCoreApplication.addLibraryPath(
+    os.path.join(os.path.dirname(_PyQt5.__file__), "Qt5", "plugins")
+)
+
+from app.audio_capture import AudioCapture, get_default_loopback, list_loopback_devices
+from app.hotkeys import HotkeyManager
+from app.live_caption import LiveCaptionState
+from app.subtitle_window import SubtitleWindow
+from app.transcriber import Transcriber
+from app.translator import build_chain
+from app.tray import TrayIcon
+from app.vad import VadSegmenter
+
+import logging
+from logging.handlers import RotatingFileHandler
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[
+        # 滚动日志：单文件 2MB，保留 2 个备份，总量封顶约 6MB
+        RotatingFileHandler(
+            LOG_PATH, maxBytes=2 * 1024 * 1024, backupCount=2, encoding="utf-8"
+        ),
+        logging.StreamHandler(),
+    ],
+)
+log = logging.getLogger("subtitle")
+
+# 首次运行（或打包后 config.yaml 不在 exe 旁边）时创建的默认配置
+DEFAULT_CONFIG = """# 实时翻译字幕配置
+
+audio:
+  device_name:             # null = 默认扬声器 loopback；也可填 audio_capture.py 自测列出的设备名
+
+whisper:
+  model_size: small        # tiny / base / small / medium
+  device: cuda             # cuda / cpu
+  compute_type: float16    # cuda 用 float16；cpu 建议 int8
+  beam_size: 1             # 1 = 最快；提到 3~5 质量略好但更慢
+
+vad:
+  threshold: 0.5
+  min_speech_ms: 250
+  min_silence_ms: 400
+  max_segment_s: 10        # 连续说话时每段最长秒数（强制切段）
+  partial_interval_s: 1.5  # 说话过程中每隔多少秒出一次实时快照字幕（调小更跟手，翻译请求更频繁）
+
+language:
+  source: auto             # 源语言：auto=自动检测；看单一语言视频可锁定 zh/en/ja/ko/ru，识别更快更准
+  target: zh               # 目标语言：zh/en/ja/ko/ru
+
+translator:
+  order:                               # 排前面优先，失败自动回退下一个
+                                      # 可选 youdao_web / mymemory / google_web / llm_api / nllb
+                                      # google_web 需要能访问 Google 的网络
+  - youdao_web
+  - nllb
+  - mymemory
+  nllb_device: cpu            # 本地 NLLB 默认 CPU，不占显存
+  llm_api:
+    base_url: https://api.deepseek.com/v1
+    api_key: ""             # 填 key 后在 order 里加 llm_api 即启用
+    model: deepseek-chat
+    context_size: 1
+
+subtitle:
+  width: 700
+  font_size: 22
+  fade_ms: 5000            # 无新字幕多少毫秒后淡出
+  click_through: true      # true=点击穿透（不影响游戏）；false=可拖动位置
+  x: 300
+  y: 800
+  bg_alpha: 140
+  zh_color: '#FFE34D'
+  src_color: '#FFFFFF'
+
+ui:
+  font_size: 13            # 设置界面字体大小（10~22），改大后窗口可手动拉大
+
+hotkey: alt+t              # 全局启停快捷键
+"""
+
+
+def load_config(path=CONFIG_PATH):
+    if not os.path.exists(path):
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(DEFAULT_CONFIG)
+        log.info("未找到配置文件，已创建默认配置: %s", path)
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    with open(path, encoding="utf-8") as f:
+        return yaml.load(f)
+
+
+def save_config(cfg, path=CONFIG_PATH):
+    yaml = YAML()
+    yaml.preserve_quotes = True
+    yaml.width = 4096  # 避免注释被折行
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.dump(cfg, f)
+
+
+def pick_device(name):
+    if not name:
+        return get_default_loopback()
+    for dev in list_loopback_devices():
+        if name in dev.name:
+            return dev
+    raise RuntimeError(f"找不到音频设备: {name}")
+
+
+class Pipeline:
+    """捕获 → VAD → 识别 → 翻译 的后台流水线，可整体启停。"""
+
+    def __init__(self, cfg, on_subtitle):
+        self.cfg = cfg
+        self.on_subtitle = on_subtitle
+        self._transcriber = None
+        self._translator = None
+        self._cap = None
+        self._threads = []
+        self._stop = threading.Event()
+        self._seg_q = queue.Queue(maxsize=8)
+        self._model_lock = threading.Lock()
+        self._model_ready = threading.Event()
+        self._model_error = None
+        self._speaker_id = None
+
+    def _ensure_models(self):
+        """首次启动时在后台线程加载模型，不卡 UI。"""
+        with self._model_lock:
+            if self._transcriber is None:
+                w = self.cfg["whisper"]
+                self._transcriber = Transcriber(
+                    model_size=w["model_size"],
+                    device=w["device"],
+                    compute_type=w["compute_type"],
+                    beam_size=w.get("beam_size", 1),
+                )
+            if self._translator is None:
+                self._translator = build_chain(self.cfg["translator"])
+        self._model_ready.set()
+
+    def start(self):
+        if self._cap is not None:
+            return
+        self._stop.clear()
+        threading.Thread(target=self._load_models_safe, daemon=True).start()
+        self._cap = AudioCapture(device=pick_device(self.cfg["audio"].get("device_name")))
+        self._cap.start()
+        # 仅在使用“默认设备”时记录扬声器 id，用于后续检测插拔耳机导致的设备切换
+        if self.cfg["audio"].get("device_name"):
+            self._speaker_id = None
+        else:
+            import soundcard as sc
+
+            self._speaker_id = sc.default_speaker().id
+        v = self.cfg.get("vad", {})
+        segmenter = VadSegmenter(
+            on_segment=self._enqueue_segment,
+            on_partial=self._enqueue_partial,
+            threshold=v.get("threshold", 0.5),
+            min_speech_ms=v.get("min_speech_ms", 250),
+            min_silence_ms=v.get("min_silence_ms", 400),
+            max_segment_s=v.get("max_segment_s", 10),
+            partial_interval_s=v.get("partial_interval_s", 2.5),
+        )
+        self._threads = [
+            threading.Thread(target=self._vad_loop, args=(segmenter,), daemon=True),
+            threading.Thread(target=self._worker_loop, daemon=True),
+        ]
+        for t in self._threads:
+            t.start()
+
+    def stop(self):
+        if self._cap is None:
+            return
+        self._stop.set()
+        self._cap.stop()
+        self._cap = None
+        try:
+            self._seg_q.put_nowait(None)  # 非阻塞：队列满时工作线程靠 _stop 标志退出
+        except queue.Full:
+            pass
+        self._threads = []
+
+    @property
+    def running(self):
+        return self._cap is not None
+
+    @property
+    def models_ready(self):
+        return self._model_ready.is_set() and self._model_error is None
+
+    def update_cfg(self, cfg, reload_transcriber=False, reload_translator=False):
+        """应用新配置。模型改动在下次启动时重建；若正在运行且识别参数变了，自动重启。"""
+        self.cfg = cfg
+        if reload_transcriber:
+            self._transcriber = None
+            self._model_ready.clear()
+            if self.running:
+                self.stop()
+                self.start()
+        if reload_translator:
+            self._translator = None
+            threading.Thread(target=self._rebuild_translator, daemon=True).start()
+
+    def _rebuild_translator(self):
+        try:
+            translator = build_chain(self.cfg["translator"])
+            with self._model_lock:
+                self._translator = translator
+            log.info("翻译后端已重建: %s", self.cfg["translator"].get("order"))
+        except Exception as e:
+            log.exception("翻译后端重建失败: %s", e)
+
+    def _load_models_safe(self):
+        try:
+            self._ensure_models()
+        except Exception as e:
+            self._model_error = e
+            self._model_ready.set()
+
+    def _enqueue_segment(self, segment):
+        self._enqueue((segment, False))
+
+    def _enqueue_partial(self, segment):
+        self._enqueue((segment, True))
+
+    def _enqueue(self, item):
+        try:
+            self._seg_q.put_nowait(item)
+        except queue.Full:
+            pass
+
+    def _vad_loop(self, segmenter):
+        cap = self._cap
+        last_check = time.time()
+        while not self._stop.is_set():
+            # 每 2 秒检查默认输出设备是否变化（如插拔耳机），变了就自动切换监听源
+            if self._speaker_id is not None and time.time() - last_check > 2:
+                last_check = time.time()
+                try:
+                    import soundcard as sc
+
+                    current = sc.default_speaker().id
+                    if current != self._speaker_id:
+                        cap.stop()
+                        cap = AudioCapture(device=get_default_loopback())
+                        cap.start()
+                        self._cap = cap
+                        self._speaker_id = current
+                        segmenter.reset()
+                        log.info("默认音频设备已变化，已自动切换监听源: %s", cap.device.name)
+                except Exception as e:
+                    log.warning("检测音频设备变化失败: %s", e)
+            try:
+                chunk = cap.queue.get(timeout=0.2)
+            except queue.Empty:
+                continue
+            segmenter.feed(chunk)
+        segmenter.flush()
+
+    def _source_lock(self):
+        """源语言锁定：auto → None（自动检测），否则返回 whisper 语言码。"""
+        src = (self.cfg.get("language") or {}).get("source", "auto")
+        return None if src == "auto" else src
+
+    def _target_lang(self):
+        return (self.cfg.get("language") or {}).get("target", "zh")
+
+    def _worker_loop(self):
+        # 等待模型加载完成（首次启动需要下载模型，可能要几分钟）
+        self._model_ready.wait()
+        if self._model_error is not None:
+            self.on_subtitle({
+                "kind": "final", "src": "",
+                "zh": f"模型加载失败：{self._model_error}。请检查网络后重新按热键重试",
+            })
+            return
+        live = LiveCaptionState(
+            lambda t, lang: self._translator.translate(t, lang, self._target_lang())
+        )
+        while not self._stop.is_set():
+            try:
+                item = self._seg_q.get(timeout=0.2)  # 超时轮询，保证 _stop 能即时生效
+            except queue.Empty:
+                continue
+            if item is None:
+                break
+            seg, is_partial = item
+            try:
+                tag = "实时快照" if is_partial else "语音片段"
+                log.info("%s %.1fs，开始识别", tag, len(seg) / 16000)
+                text, lang = self._transcriber.transcribe(seg, language=self._source_lock())
+                if not text:
+                    continue
+                if is_partial:
+                    # 快照：走 LocalAgreement，定稿区稳定、尾部滚动
+                    payload = live.update(text, lang)
+                    self.on_subtitle(payload)
+                    log.info("识别 [%s]（实时）: %s", lang, text)
+                else:
+                    # 段落定稿：整句重译，挪入历史行
+                    live.reset()
+                    zh = None
+                    try:
+                        zh = self._translator.translate(text, lang, self._target_lang())
+                    except Exception as e:
+                        log.warning("翻译整体失败，先显示原文: %s", e)
+                    self.on_subtitle({
+                        "kind": "final", "src": text,
+                        "zh": zh if zh else "…翻译服务暂时不可用…",
+                    })
+                    log.info("识别 [%s]: %s → %s", lang, text, zh)
+            except Exception as e:
+                log.exception("处理片段出错: %s", e)
+
+
+class ToggleBridge(QObject):
+    """把后台线程的请求安全地送入 Qt 主线程。"""
+
+    toggle_requested = pyqtSignal()
+    subtitle_received = pyqtSignal(dict)  # 上屏负载：kind=live/final
+    update_result = pyqtSignal(dict)      # 检查更新结果
+
+
+class MainApp:
+    def __init__(self):
+        self.cfg = load_config()
+        # Windows 任务栏按 AppUserModelID 分组，显式设置后任务栏才会显示应用图标
+        # 而不是 python.exe 的默认图标
+        try:
+            _ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(
+                "RealtimeTranslateSubtitles.1.0"
+            )
+        except Exception:
+            pass
+        self.app = QApplication(sys.argv)
+        self.app.setQuitOnLastWindowClosed(False)
+        # 应用图标：任务栏、标题栏、设置窗口统一使用
+        _icon = resource_path(os.path.join("assets", "icon.ico"))
+        if os.path.exists(_icon):
+            self.app.setWindowIcon(QIcon(_icon))
+        self.subtitle_count = 0
+        self.settings_window = None
+
+        self.window = SubtitleWindow(self.cfg.get("subtitle", {}))
+
+        self.bridge = ToggleBridge()
+        self.bridge.toggle_requested.connect(self._do_toggle)
+        self.bridge.subtitle_received.connect(self._on_subtitle)
+        self.bridge.update_result.connect(self._show_update_result)
+
+        # 后台工作线程经 bridge 信号把字幕送进 Qt 主线程（线程安全）
+        self.pipeline = Pipeline(self.cfg, self._emit_subtitle)
+
+        self.tray = TrayIcon(on_toggle=self.toggle, on_quit=self.quit, on_settings=self.open_settings)
+        self.tray.show()
+
+        self.hotkeys = HotkeyManager(
+            app=self.app, hotkey=self.cfg.get("hotkey", "alt+t"), on_toggle=self.toggle
+        )
+        self.hotkeys.start()
+
+        hotkey = self.cfg.get("hotkey", "alt+t")
+        self.tray.showMessage(
+            "实时翻译字幕", f"按 {hotkey} 开始监听，右键托盘打开设置",
+            QSystemTrayIcon.Information, 3000,
+        )
+
+    def _emit_subtitle(self, payload):
+        self.bridge.subtitle_received.emit(payload)
+
+    def _on_subtitle(self, payload):
+        if payload.get("kind") == "final":
+            self.subtitle_count += 1
+            if self.settings_window is not None:
+                self.settings_window.set_subtitle_count(self.subtitle_count)
+            self.window.show_final(payload["src"], payload["zh"])
+        else:
+            self.window.show_live(payload)
+
+    def _finish_drag(self):
+        x, y = self.window.exit_drag_mode()
+        self.settings_window.set_position(x, y)
+        log.info("字幕位置已定位: (%d, %d)，点“保存并应用”生效", x, y)
+
+    def _check_update(self):
+        """后台线程查询 GitHub Releases，结果经 bridge 回主线程显示。"""
+        from app.updater import check_update
+
+        def run():
+            result = check_update()
+            log.info("检查更新: %s", result)
+            self.bridge.update_result.emit(result)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _show_update_result(self, result):
+        if self.settings_window is not None:
+            self.settings_window.show_update_result(result)
+
+    def _live_preview(self, subtitle_cfg):
+        """设置页外观改动：立即应用到字幕窗并显示预览（不写配置文件）。"""
+        self.window.apply_config(subtitle_cfg)
+        if self.settings_window is not None and self.settings_window.isVisible():
+            self.window.update_text(
+                "Live preview of the subtitle style.", "实时预览：样式改动即时生效"
+            )
+
+    def open_settings(self):
+        if self.settings_window is None:
+            from app.settings_window import SettingsWindow
+
+            self.settings_window = SettingsWindow(self.cfg)
+            self.settings_window.request_toggle.connect(self.toggle)
+            self.settings_window.request_apply.connect(self.apply_config)
+            self.settings_window.request_preview.connect(
+                lambda: self.window.update_text(
+                    "This is a preview of the subtitle style.", "这是字幕样式预览。"
+                )
+            )
+            self.settings_window.request_drag_start.connect(self.window.enter_drag_mode)
+            self.settings_window.request_drag_end.connect(self._finish_drag)
+            self.settings_window.request_live_preview.connect(self._live_preview)
+            self.settings_window.request_check_update.connect(self._check_update)
+            self.settings_window.set_running(self.pipeline.running)
+            self.settings_window.set_subtitle_count(self.subtitle_count)
+        try:
+            device_name = pick_device(self.cfg["audio"].get("device_name")).name
+        except Exception:
+            device_name = ""
+        self.settings_window.refresh_info(device_name)
+        self.settings_window.show()
+        self.settings_window.raise_()
+        self.settings_window.activateWindow()
+
+    def apply_config(self, cfg):
+        old_whisper = dict(self.cfg.get("whisper", {}))
+        old_translator = dict(self.cfg.get("translator", {}))
+        save_config(cfg)
+        self.cfg = cfg
+        self.window.apply_config(cfg.get("subtitle", {}))
+        self.pipeline.update_cfg(
+            cfg,
+            reload_transcriber=dict(cfg.get("whisper", {})) != old_whisper,
+            reload_translator=dict(cfg.get("translator", {})) != old_translator,
+        )
+        if self.settings_window is not None:
+            self.settings_window.refresh_info()
+        log.info("配置已保存并应用")
+        self.tray.showMessage(
+            "实时翻译字幕", "配置已保存并应用",
+            QSystemTrayIcon.Information, 1500,
+        )
+
+    def toggle(self):
+        self.bridge.toggle_requested.emit()
+
+    def _do_toggle(self):
+        try:
+            if self.pipeline.running:
+                self.pipeline.stop()
+                self.window.set_running(False)
+                self.tray.set_running(False)
+                log.info("已停止")
+            else:
+                self.pipeline.start()
+                self.tray.set_running(True)
+                if not self.pipeline.models_ready:
+                    # 模型未就绪时先给用户明确反馈（首次运行要下载约 460MB 识别模型）
+                    self.window.update_text(
+                        "", "正在加载模型…（首次运行需下载识别模型约 460MB，请保持网络畅通）"
+                    )
+                log.info("已开始监听（首次启动需加载模型，请稍候）")
+            if self.settings_window is not None:
+                self.settings_window.set_running(self.pipeline.running)
+        except Exception as e:
+            log.exception("切换出错")
+            QMessageBox.critical(None, "错误", str(e))
+
+    def quit(self):
+        self.pipeline.stop()
+        self.hotkeys.stop()
+        self.app.quit()
+
+    def run(self):
+        sys.exit(self.app.exec_())
+
+
+if __name__ == "__main__":
+    MainApp().run()

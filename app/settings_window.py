@@ -1,0 +1,868 @@
+"""设置主窗口：深色主题，侧边栏导航（主页 / 字幕外观 / 识别模型 / 翻译服务 / 日志）。"""
+
+import os
+import subprocess
+import sys
+
+from PyQt5.QtCore import Qt, QTimer, pyqtSignal
+from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtWidgets import (    QApplication,
+    QCheckBox,
+    QColorDialog,
+    QComboBox,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QMainWindow,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QSlider,
+    QSpinBox,
+    QStackedWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from .version import __version__
+
+try:
+    from .paths import base_dir
+except ImportError:  # 直接运行本文件做界面预览时
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    from app.paths import base_dir
+
+QSS = """
+QMainWindow, QWidget { background: #1e1e26; color: #e6e6ea; font-family: "Microsoft YaHei"; font-size: __FS__px; }
+QListWidget#sidebar { background: #17171d; border: none; font-size: __FS_SIDEBAR__px; outline: none; }
+QListWidget#sidebar::item { padding: 14px 18px; color: #9a9aa5; }
+QListWidget#sidebar::item:selected { background: #2d2d3a; color: #ffffff; border-left: 3px solid #4f8cff; }
+QListWidget#sidebar::item:hover { color: #ffffff; }
+QGroupBox { border: 1px solid #34343f; border-radius: 8px; margin-top: 14px; padding-top: 10px; font-weight: bold; }
+QGroupBox::title { subcontrol-origin: margin; left: 12px; color: #8ab4ff; }
+QPushButton { background: #2d2d3a; border: none; border-radius: 6px; padding: 8px 16px; }
+QPushButton:hover { background: #3a3a4c; }
+QPushButton:pressed { background: #25252f; }
+QPushButton#primary { background: #4f8cff; color: white; font-weight: bold; }
+QPushButton#primary:hover { background: #6ba0ff; }
+QPushButton#danger { background: #c0492f; color: white; }
+QLineEdit, QSpinBox, QComboBox, QPlainTextEdit {
+    background: #17171d; border: 1px solid #34343f; border-radius: 6px; padding: 6px 8px;
+    selection-background-color: #4f8cff;
+}
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: #4f8cff; }
+QComboBox QAbstractItemView { background: #2d2d3a; selection-background-color: #4f8cff; }
+QSlider::groove:horizontal { height: 6px; background: #34343f; border-radius: 3px; }
+QSlider::handle:horizontal { width: 16px; height: 16px; margin: -5px 0; border-radius: 8px; background: #4f8cff; }
+QSlider::sub-page:horizontal { background: #4f8cff; border-radius: 3px; }
+QCheckBox { spacing: 8px; }
+QCheckBox::indicator { width: 16px; height: 16px; }
+QListWidget#orderList { background: #17171d; border: 1px solid #34343f; border-radius: 6px; }
+QLabel#hint { color: #8a8a95; font-size: __FS_HINT__px; }
+QLabel#statusDot { font-size: __FS_DOT__px; }
+QPushButton#helpToggle { background: transparent; color: #8ab4ff; text-align: left; padding: 4px 0; border: none; }
+QPushButton#helpToggle:hover { color: #a8c6ff; }
+"""
+
+
+def build_qss(fs=13):
+    """按界面字号生成样式表：正文用 fs，侧边栏/状态点略大，提示文字略小。"""
+    return (
+        QSS.replace("__FS_SIDEBAR__", str(fs + 2))
+        .replace("__FS_DOT__", str(fs + 5))
+        .replace("__FS_HINT__", str(max(10, fs - 1)))
+        .replace("__FS__", str(fs))
+    )
+
+class SliderSpin(QWidget):
+    """拖动条 + 精确数值输入二合一控件，点右侧按钮切换显示模式，两者双向同步。"""
+
+    valueChanged = pyqtSignal(int)
+
+    def __init__(self, minimum, maximum, value, suffix="", step=1, parent=None):
+        super().__init__(parent)
+        self._suffix = suffix
+
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(minimum, maximum)
+        self.slider.setSingleStep(step)
+        self.slider.setValue(value)
+        self.label = QLabel(f"{value} {suffix}".strip())
+        self.label.setMinimumWidth(70)
+        slider_page = QWidget()
+        h = QHBoxLayout(slider_page)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.addWidget(self.slider, 1)
+        h.addWidget(self.label)
+
+        self.spin = QSpinBox()
+        self.spin.setRange(minimum, maximum)
+        self.spin.setSingleStep(step)
+        self.spin.setValue(value)
+        self.spin.setSuffix(f" {suffix}" if suffix else "")
+
+        self.stack = QStackedWidget()
+        self.stack.addWidget(slider_page)
+        self.stack.addWidget(self.spin)
+
+        self.btn_mode = QPushButton("✎")
+        self.btn_mode.setToolTip("切换 拖动条 / 精确数值输入")
+        self.btn_mode.setFixedWidth(34)
+        self.btn_mode.clicked.connect(self._toggle_mode)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.stack, 1)
+        layout.addWidget(self.btn_mode)
+
+        self.slider.valueChanged.connect(self._from_slider)
+        self.spin.valueChanged.connect(self._from_spin)
+
+    def _toggle_mode(self):
+        self.stack.setCurrentIndex(1 - self.stack.currentIndex())
+
+    def _from_slider(self, v):
+        self.spin.blockSignals(True)
+        self.spin.setValue(v)
+        self.spin.blockSignals(False)
+        self.label.setText(f"{v} {self._suffix}".strip())
+        self.valueChanged.emit(v)
+
+    def _from_spin(self, v):
+        self.slider.blockSignals(True)
+        self.slider.setValue(v)
+        self.slider.blockSignals(False)
+        self.label.setText(f"{v} {self._suffix}".strip())
+        self.valueChanged.emit(v)
+
+    def value(self):
+        return self.slider.value()
+
+    def setValue(self, v):
+        self.slider.setValue(v)  # 会经 _from_slider 同步到 spin 并发出 valueChanged
+
+
+def make_help_widget(lines):
+    """可折叠的“各项说明”：一个切换按钮 + 默认隐藏的说明文本（不占地方）。"""
+    container = QWidget()
+    v = QVBoxLayout(container)
+    v.setContentsMargins(0, 4, 0, 0)
+    v.setSpacing(4)
+    btn = QPushButton("各项说明 ▾")
+    btn.setObjectName("helpToggle")
+    btn.setCheckable(True)
+    detail = QLabel("\n".join(lines))
+    detail.setObjectName("hint")
+    detail.setWordWrap(True)
+    detail.setVisible(False)
+
+    def _toggle(on):
+        detail.setVisible(on)
+        btn.setText("各项说明 ▴" if on else "各项说明 ▾")
+
+    btn.toggled.connect(_toggle)
+    v.addWidget(btn)
+    v.addWidget(detail)
+    return container
+
+
+BACKENDS = {
+    "youdao_web": ("有道翻译（在线）", "国内直连，无需 key，质量良好"),
+    "mymemory": ("MyMemory（在线）", "免费无需 key，备用"),
+    "google_web": ("Google 翻译（在线）", "需要能访问 Google 的网络"),
+    "llm_api": ("大模型 API", "DeepSeek/豆包/GPT 等，口语质量最好，需填 key"),
+    "nllb": ("NLLB 本地模型", "离线兜底，无需网络，速度较慢"),
+}
+
+
+class SettingsWindow(QMainWindow):
+    request_toggle = pyqtSignal()
+    request_apply = pyqtSignal(dict)
+    request_preview = pyqtSignal()
+    request_drag_start = pyqtSignal()
+    request_drag_end = pyqtSignal()
+    request_live_preview = pyqtSignal(dict)  # 外观控件改动时实时预览
+    request_check_update = pyqtSignal()  # “检查更新”按钮
+
+    # 字幕外观默认值（“恢复默认设置”用）
+    SUBTITLE_DEFAULTS = {
+        "font_size": 22,
+        "bg_alpha": 140,
+        "width": 700,
+        "fade_ms": 5000,
+        "click_through": True,
+        "zh_color": "#FFE34D",
+        "src_color": "#FFFFFF",
+    }
+
+    def __init__(self, cfg):
+        super().__init__()
+        self.cfg = cfg
+        self.setWindowTitle(f"实时翻译字幕 · 设置 v{__version__}")
+        self.resize(760, 560)
+        self._ui_font = (cfg.get("ui") or {}).get("font_size", 13)
+        self.setStyleSheet(build_qss(self._ui_font))
+
+        root = QWidget()
+        self.setCentralWidget(root)
+        layout = QHBoxLayout(root)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+
+        self.sidebar = QListWidget()
+        self.sidebar.setObjectName("sidebar")
+        self.sidebar.setFixedWidth(150)
+        for name in ["主页", "字幕外观", "识别模型", "翻译服务", "日志"]:
+            self.sidebar.addItem(QListWidgetItem(name))
+        layout.addWidget(self.sidebar)
+
+        right = QWidget()
+        right_layout = QVBoxLayout(right)
+        right_layout.setContentsMargins(20, 16, 20, 16)
+        self.pages = QStackedWidget()
+        right_layout.addWidget(self.pages)
+
+        self._build_home_page()
+        self._build_subtitle_page()
+        self._build_whisper_page()
+        self._build_translator_page()
+        self._build_log_page()
+
+        # 字幕外观控件改动 → 实时预览（不写配置，关闭窗口未保存则自动还原）
+        self._live_dirty = False
+        self.spin_font.valueChanged.connect(self._emit_live_preview)
+        self.slider_alpha.valueChanged.connect(self._emit_live_preview)
+        self.spin_width.valueChanged.connect(self._emit_live_preview)
+        self.spin_fade.valueChanged.connect(self._emit_live_preview)
+        self.chk_through.toggled.connect(self._emit_live_preview)
+        self.spin_x.valueChanged.connect(self._emit_live_preview)
+        self.spin_y.valueChanged.connect(self._emit_live_preview)
+
+        apply_bar = QHBoxLayout()
+        apply_bar.addStretch()
+        self.btn_apply = QPushButton("保存并应用")
+        self.btn_apply.setObjectName("primary")
+        self.btn_apply.setMinimumWidth(140)
+        self.btn_apply.clicked.connect(self._on_apply)
+        apply_bar.addWidget(self.btn_apply)
+        right_layout.addLayout(apply_bar)
+
+        layout.addWidget(right)
+        self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
+        self.sidebar.setCurrentRow(0)
+
+        self._log_timer = QTimer(self)
+        self._log_timer.setInterval(2000)
+        self._log_timer.timeout.connect(self._refresh_log)
+
+    # ---------- 主页 ----------
+    def _build_home_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+
+        box = QGroupBox("运行状态")
+        h = QHBoxLayout(box)
+        self.status_dot = QLabel("●")
+        self.status_dot.setObjectName("statusDot")
+        self.status_label = QLabel("已停止")
+        self.status_label.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
+        h.addWidget(self.status_dot)
+        h.addWidget(self.status_label)
+        h.addStretch()
+        self.btn_toggle = QPushButton("开始监听")
+        self.btn_toggle.setObjectName("primary")
+        self.btn_toggle.setMinimumSize(120, 40)
+        self.btn_toggle.clicked.connect(self.request_toggle.emit)
+        h.addWidget(self.btn_toggle)
+        v.addWidget(box)
+
+        info = QGroupBox("当前配置")
+        f = QFormLayout(info)
+        self.info_hotkey = QLabel()
+        self.info_device = QLabel()
+        self.info_model = QLabel()
+        self.info_backend = QLabel()
+        f.addRow("全局热键", self.info_hotkey)
+        f.addRow("音频来源", self.info_device)
+        f.addRow("识别模型", self.info_model)
+        f.addRow("翻译后端", self.info_backend)
+        v.addWidget(info)
+
+        stat = QGroupBox("统计")
+        fh = QFormLayout(stat)
+        self.stat_count = QLabel("0")
+        fh.addRow("本次会话字幕", self.stat_count)
+        v.addWidget(stat)
+
+        ui_box = QGroupBox("界面")
+        uf = QFormLayout(ui_box)
+        self.spin_ui_font = SliderSpin(10, 22, self._ui_font, suffix="px")
+        self.spin_ui_font.valueChanged.connect(self._apply_ui_font)
+        uf.addRow("界面字体大小", self.spin_ui_font)
+        ui_hint = QLabel("拖动即可看到效果；“保存并应用”后下次打开保持。")
+        ui_hint.setObjectName("hint")
+        uf.addRow(ui_hint)
+        v.addWidget(ui_box)
+
+        about = QGroupBox("关于")
+        af = QFormLayout(about)
+        af.addRow("当前版本", QLabel(f"v{__version__}"))
+        update_row = QHBoxLayout()
+        self.btn_update = QPushButton("检查更新")
+        self.btn_update.clicked.connect(self._on_check_update)
+        self.update_result = QLabel("")
+        self.update_result.setObjectName("hint")
+        update_row.addWidget(self.btn_update)
+        update_row.addWidget(self.update_result)
+        update_row.addStretch()
+        af.addRow(update_row)
+        v.addWidget(about)
+
+        hint = QLabel("提示：托盘图标双击可快速启停；关闭本窗口不会退出程序（托盘常驻）。")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        v.addStretch()
+        self.pages.addWidget(page)
+
+    # ---------- 字幕外观 ----------
+    def _build_subtitle_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        s = self.cfg["subtitle"]
+
+        box = QGroupBox("样式")
+        f = QFormLayout(box)
+
+        self.spin_font = SliderSpin(12, 60, s.get("font_size", 22), suffix="px")
+        f.addRow("字体大小", self.spin_font)
+
+        self.slider_alpha = SliderSpin(20, 255, s.get("bg_alpha", 140), step=5)
+        f.addRow("背景不透明度", self.slider_alpha)
+
+        self.spin_width = SliderSpin(300, 2000, s.get("width", 700), suffix="px", step=10)
+        f.addRow("字幕条宽度", self.spin_width)
+
+        self.spin_fade = SliderSpin(1000, 30000, s.get("fade_ms", 5000), suffix="ms", step=500)
+        f.addRow("无语音淡出", self.spin_fade)
+
+        self.chk_through = QCheckBox("点击穿透（鼠标操作穿透字幕窗，不影响游戏）")
+        self.chk_through.setChecked(s.get("click_through", True))
+        f.addRow(self.chk_through)
+        v.addWidget(box)
+
+        color_box = QGroupBox("颜色")
+        cf = QFormLayout(color_box)
+        self._zh_color = s.get("zh_color", "#FFE34D")
+        self._src_color = s.get("src_color", "#FFFFFF")
+        self.btn_zh_color = QPushButton()
+        self.btn_src_color = QPushButton()
+        self.btn_zh_color.clicked.connect(lambda: self._pick_color("zh"))
+        self.btn_src_color.clicked.connect(lambda: self._pick_color("src"))
+        self._refresh_color_btns()
+        cf.addRow("译文颜色", self.btn_zh_color)
+        cf.addRow("原文颜色", self.btn_src_color)
+        color_hint = QLabel("未确认中的滚动文字会自动使用同色的半透明效果。")
+        color_hint.setObjectName("hint")
+        cf.addRow(color_hint)
+        v.addWidget(color_box)
+
+        pos = QGroupBox("位置")
+        pv = QVBoxLayout(pos)
+        preset_row = QHBoxLayout()
+        for label, key in [("顶部居中", "top"), ("屏幕中央", "center"), ("底部居中", "bottom")]:
+            btn = QPushButton(label)
+            btn.clicked.connect(lambda _, k=key: self._apply_preset(k))
+            preset_row.addWidget(btn)
+        pv.addLayout(preset_row)
+        xy_row = QHBoxLayout()
+        self.spin_x = QSpinBox()
+        self.spin_x.setRange(0, 10000)
+        self.spin_x.setValue(s.get("x", 300))
+        self.spin_y = QSpinBox()
+        self.spin_y.setRange(0, 10000)
+        self.spin_y.setValue(s.get("y", 800))
+        xy_row.addWidget(QLabel("X"))
+        xy_row.addWidget(self.spin_x)
+        xy_row.addWidget(QLabel("Y"))
+        xy_row.addWidget(self.spin_y)
+        xy_row.addStretch()
+        pv.addLayout(xy_row)
+        drag_row = QHBoxLayout()
+        self.btn_drag = QPushButton("手动拖动定位")
+        self.btn_drag.clicked.connect(self._on_drag_clicked)
+        drag_row.addWidget(self.btn_drag)
+        drag_hint = QLabel("点击后字幕条会显示出来，用鼠标拖到想要的位置 → 点“完成定位” → “保存并应用”")
+        drag_hint.setObjectName("hint")
+        drag_row.addWidget(drag_hint)
+        drag_row.addStretch()
+        pv.addLayout(drag_row)
+        self._dragging = False
+        v.addWidget(pos)
+
+        btn_row = QHBoxLayout()
+        btn_preview = QPushButton("预览字幕效果")
+        btn_preview.clicked.connect(self.request_preview.emit)
+        btn_row.addWidget(btn_preview)
+        btn_restore = QPushButton("恢复默认设置")
+        btn_restore.setObjectName("danger")
+        btn_restore.clicked.connect(self._on_restore_defaults)
+        btn_row.addWidget(btn_restore)
+        btn_row.addStretch()
+        v.addLayout(btn_row)
+
+        hint = QLabel("外观改动会实时预览（不写入配置）；关闭本窗口时未保存的改动自动还原。点“保存并应用”后才持久生效。")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+
+        v.addWidget(make_help_widget([
+            "字体大小：译文行的字号，原文行和历史行会按比例自动缩小。",
+            "背景不透明度：字幕条黑底的深浅，20 几乎全透明，255 全黑。",
+            "字幕条宽度：字幕的最大宽度，文字超出会自动换行。",
+            "无语音淡出：多久没有新字幕后自动隐藏字幕条，有声音时立即重新显示。",
+            "点击穿透：开启后鼠标可以穿过字幕条操作游戏；用“手动拖动定位”时会临时关闭。",
+            "颜色：译文/原文的显示颜色，正在识别中的滚动文字自动使用同色的半透明效果。",
+            "位置：预设档位一键摆放到顶部/中央/底部，也可填坐标或手动拖动精确定位。",
+        ]))
+        v.addStretch()
+        self.pages.addWidget(page)
+
+    def _on_drag_clicked(self):
+        if not self._dragging:
+            self._dragging = True
+            self.btn_drag.setText("完成定位")
+            self.request_drag_start.emit()
+        else:
+            self._dragging = False
+            self.btn_drag.setText("手动拖动定位")
+            self.request_drag_end.emit()
+
+    def set_position(self, x, y):
+        """拖动完成后由主程序回调，把实际坐标填回输入框。"""
+        self.spin_x.setValue(x)
+        self.spin_y.setValue(y)
+
+    def _pick_color(self, which):
+        current = self._zh_color if which == "zh" else self._src_color
+        color = QColorDialog.getColor(QColor(current), self, "选择字幕颜色")
+        if not color.isValid():
+            return
+        if which == "zh":
+            self._zh_color = color.name().upper()
+        else:
+            self._src_color = color.name().upper()
+        self._refresh_color_btns()
+        self._emit_live_preview()
+
+    def _refresh_color_btns(self):
+        for btn, hex_color in ((self.btn_zh_color, self._zh_color), (self.btn_src_color, self._src_color)):
+            c = QColor(hex_color)
+            fg = "#000000" if (c.red() * 299 + c.green() * 587 + c.blue() * 114) > 150000 else "#FFFFFF"
+            btn.setText(hex_color)
+            btn.setStyleSheet(f"background: {hex_color}; color: {fg}; border-radius: 6px; padding: 6px 16px;")
+
+    def _subtitle_ui_values(self):
+        return {
+            "font_size": self.spin_font.value(),
+            "bg_alpha": self.slider_alpha.value(),
+            "width": self.spin_width.value(),
+            "fade_ms": self.spin_fade.value(),
+            "click_through": self.chk_through.isChecked(),
+            "x": self.spin_x.value(),
+            "y": self.spin_y.value(),
+            "zh_color": self._zh_color,
+            "src_color": self._src_color,
+        }
+
+    def _emit_live_preview(self, *_):
+        self._live_dirty = True
+        self.request_live_preview.emit(self._subtitle_ui_values())
+
+    def _on_restore_defaults(self):
+        if QMessageBox.question(
+            self, "恢复默认设置",
+            "确定把字幕外观恢复为默认值吗？\n（点“保存并应用”后才会写入配置）",
+        ) != QMessageBox.Yes:
+            return
+        d = self.SUBTITLE_DEFAULTS
+        self.spin_font.setValue(d["font_size"])
+        self.slider_alpha.setValue(d["bg_alpha"])
+        self.spin_width.setValue(d["width"])
+        self.spin_fade.setValue(d["fade_ms"])
+        self.chk_through.setChecked(d["click_through"])
+        self._zh_color = d["zh_color"]
+        self._src_color = d["src_color"]
+        self._refresh_color_btns()
+        self._apply_preset("bottom")
+
+    def _apply_preset(self, key):
+        screen = QApplication.primaryScreen().availableGeometry()
+        w = self.spin_width.value()
+        x = screen.x() + (screen.width() - w) // 2
+        if key == "top":
+            y = screen.y() + 60
+        elif key == "center":
+            y = screen.y() + screen.height() // 2 - 60
+        else:
+            y = screen.y() + screen.height() - 220
+        self.spin_x.setValue(x)
+        self.spin_y.setValue(y)
+
+    # ---------- 识别模型 ----------
+    def _build_whisper_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        w = self.cfg["whisper"]
+
+        lang_box = QGroupBox("语言")
+        lf = QFormLayout(lang_box)
+        lang_cfg = self.cfg.get("language") or {}
+        self.combo_src_lang = QComboBox()
+        for code, name in [("auto", "自动检测"), ("zh", "中文"), ("en", "英语"),
+                           ("ja", "日语"), ("ko", "韩语"), ("ru", "俄语")]:
+            self.combo_src_lang.addItem(name, code)
+        idx = self.combo_src_lang.findData(lang_cfg.get("source", "auto"))
+        self.combo_src_lang.setCurrentIndex(max(0, idx))
+        lf.addRow("源语言（听到的）", self.combo_src_lang)
+
+        self.combo_tgt_lang = QComboBox()
+        for code, name in [("zh", "中文"), ("en", "英语"), ("ja", "日语"),
+                           ("ko", "韩语"), ("ru", "俄语")]:
+            self.combo_tgt_lang.addItem(name, code)
+        idx = self.combo_tgt_lang.findData(lang_cfg.get("target", "zh"))
+        self.combo_tgt_lang.setCurrentIndex(max(0, idx))
+        lf.addRow("目标语言（翻译成）", self.combo_tgt_lang)
+
+        lang_hint = QLabel(
+            "自动检测适合视频里语言混说；看单一语言视频时锁定源语言，识别更快更准。"
+            "语言改动保存后立即生效，无需重启监听。"
+        )
+        lang_hint.setObjectName("hint")
+        lang_hint.setWordWrap(True)
+        lf.addRow(lang_hint)
+        v.addWidget(lang_box)
+
+        box = QGroupBox("faster-whisper 语音识别")
+        f = QFormLayout(box)
+
+        self.combo_model = QComboBox()
+        self.combo_model.addItems(["tiny", "base", "small", "medium"])
+        self.combo_model.setCurrentText(w.get("model_size", "small"))
+        f.addRow("模型档位", self.combo_model)
+
+        self.combo_device = QComboBox()
+        self.combo_device.addItems(["cuda", "cpu"])
+        self.combo_device.setCurrentText(w.get("device", "cuda"))
+        f.addRow("运行设备", self.combo_device)
+
+        self.combo_compute = QComboBox()
+        self.combo_compute.addItems(["float16", "int8"])
+        self.combo_compute.setCurrentText(w.get("compute_type", "float16"))
+        f.addRow("计算精度", self.combo_compute)
+
+        self.spin_beam = QSpinBox()
+        self.spin_beam.setRange(1, 5)
+        self.spin_beam.setValue(w.get("beam_size", 1))
+        f.addRow("Beam size", self.spin_beam)
+        v.addWidget(box)
+
+        hint = QLabel("识别参数改动后自动重启监听生效（需重新加载模型，等待几秒）。")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+
+        v.addWidget(make_help_widget([
+            "源语言：听到的语言。自动检测适合视频里多国语言混说；看单一语言视频时锁定，识别更快更准。",
+            "目标语言：字幕翻译成的语言。改动保存后立即生效，无需重启。",
+            "模型档位：识别用的模型大小。tiny/base 最快但错字多；small 均衡（推荐）；medium 最准但可能跟不上语速。",
+            "运行设备：cuda = 用显卡识别（快）；cpu = 用处理器（慢 3~5 倍），显卡被占满时才考虑。",
+            "计算精度：与运行设备配对使用，cuda 选 float16，cpu 选 int8。",
+            "Beam size：识别时每步比较的候选数量。1 最快（实时字幕推荐）；3~5 略准但明显变慢。",
+        ]))
+        v.addStretch()
+        self.pages.addWidget(page)
+
+    # ---------- 翻译服务 ----------
+    def _build_translator_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+        t = self.cfg["translator"]
+
+        box = QGroupBox("后端优先级（勾选启用，自上而下依次尝试）")
+        bl = QHBoxLayout(box)
+        self.order_list = QListWidget()
+        self.order_list.setObjectName("orderList")
+        for name in t.get("order", []):
+            self._add_backend_item(name, True)
+        for name in BACKENDS:
+            if name not in t.get("order", []):
+                self._add_backend_item(name, False)
+        bl.addWidget(self.order_list)
+        btns = QVBoxLayout()
+        btn_up = QPushButton("上移")
+        btn_up.clicked.connect(lambda: self._move_item(-1))
+        btn_down = QPushButton("下移")
+        btn_down.clicked.connect(lambda: self._move_item(1))
+        btns.addWidget(btn_up)
+        btns.addWidget(btn_down)
+        btns.addStretch()
+        bl.addLayout(btns)
+        v.addWidget(box)
+
+        nllb_row = QFormLayout()
+        self.combo_nllb = QComboBox()
+        self.combo_nllb.addItems(["cpu", "cuda"])
+        self.combo_nllb.setCurrentText(t.get("nllb_device", "cpu"))
+        nllb_row.addRow("NLLB 运行设备", self.combo_nllb)
+        v.addLayout(nllb_row)
+
+        llm = QGroupBox("大模型 API（选择“大模型 API”后端时生效）")
+        lf = QFormLayout(llm)
+        cfg_llm = t.get("llm_api", {})
+        self.edit_base_url = QLineEdit(cfg_llm.get("base_url", ""))
+        self.edit_base_url.setPlaceholderText("https://api.deepseek.com/v1")
+        self.edit_api_key = QLineEdit(cfg_llm.get("api_key", ""))
+        self.edit_api_key.setEchoMode(QLineEdit.Password)
+        self.edit_api_key.setPlaceholderText("sk-...")
+        self.edit_model = QLineEdit(cfg_llm.get("model", ""))
+        self.edit_model.setPlaceholderText("deepseek-chat")
+        lf.addRow("Base URL", self.edit_base_url)
+        lf.addRow("API Key", self.edit_api_key)
+        lf.addRow("模型名", self.edit_model)
+        v.addWidget(llm)
+
+        v.addWidget(make_help_widget([
+            "后端优先级：排最上面的先用，失败或限流时自动切换到下一个，全部失败会稍后自动恢复重试。",
+            "有道翻译：免 key、国内直连，速度快，但只支持“外语 ↔ 中文”。",
+            "大模型 API：DeepSeek 等，口语和游戏术语翻译质量最好，需要填 API Key（按量计费）。",
+            "MyMemory / Google：免费备用；Google 需要能访问它的网络。",
+            "NLLB 本地模型：离线兜底，断网也能翻，质量一般、速度较慢。",
+            "NLLB 运行设备：cpu 不占显存（推荐，把显存留给识别和游戏）；cuda 更快但多占约 1GB 显存。",
+            "Base URL / API Key / 模型名：选择“大模型 API”后端时生效，DeepSeek 官方地址为 https://api.deepseek.com/v1。",
+        ]))
+
+        hint = QLabel("API Key 以明文保存在本地 config.yaml 中。翻译后端改动立即重建，无需重启监听。")
+        hint.setObjectName("hint")
+        hint.setWordWrap(True)
+        v.addWidget(hint)
+        v.addStretch()
+        self.pages.addWidget(page)
+
+    def _add_backend_item(self, name, checked):
+        title, desc = BACKENDS.get(name, (name, ""))
+        item = QListWidgetItem(f"{title}  —  {desc}")
+        item.setData(Qt.UserRole, name)
+        item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+        item.setCheckState(Qt.Checked if checked else Qt.Unchecked)
+        self.order_list.addItem(item)
+
+    def _move_item(self, delta):
+        row = self.order_list.currentRow()
+        if row < 0:
+            return
+        new_row = row + delta
+        if 0 <= new_row < self.order_list.count():
+            item = self.order_list.takeItem(row)
+            self.order_list.insertItem(new_row, item)
+            self.order_list.setCurrentRow(new_row)
+
+    # ---------- 日志 ----------
+    def _build_log_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setFont(QFont("Consolas", 9))
+        v.addWidget(self.log_view)
+
+        row = QHBoxLayout()
+        self.chk_autolog = QCheckBox("自动刷新")
+        self.chk_autolog.setChecked(True)
+        self.chk_autolog.toggled.connect(
+            lambda on: self._log_timer.start() if on else self._log_timer.stop()
+        )
+        btn_refresh = QPushButton("刷新")
+        btn_refresh.clicked.connect(self._refresh_log)
+        btn_clear = QPushButton("清空日志")
+        btn_clear.setObjectName("danger")
+        btn_clear.clicked.connect(self._clear_log)
+        btn_open = QPushButton("打开所在目录")
+        btn_open.clicked.connect(lambda: subprocess.Popen(["explorer", base_dir()]))
+        row.addWidget(self.chk_autolog)
+        row.addStretch()
+        row.addWidget(btn_refresh)
+        row.addWidget(btn_clear)
+        row.addWidget(btn_open)
+        v.addLayout(row)
+        self.pages.addWidget(page)
+
+    # ---------- 公共 ----------
+    def set_running(self, running):
+        if running:
+            self.status_dot.setStyleSheet("color: #4CAF50;")
+            self.status_label.setText("运行中")
+            self.btn_toggle.setText("停止监听")
+        else:
+            self.status_dot.setStyleSheet("color: #888888;")
+            self.status_label.setText("已停止")
+            self.btn_toggle.setText("开始监听")
+
+    def set_subtitle_count(self, n):
+        self.stat_count.setText(str(n))
+
+    def _apply_ui_font(self, size):
+        """界面字号改动：立即重刷样式表（不写配置）。"""
+        self._ui_font = size
+        self.setStyleSheet(build_qss(size))
+
+    # ---------- 检查更新 ----------
+    def _on_check_update(self):
+        self.btn_update.setEnabled(False)
+        self.update_result.setText("正在检查…")
+        self.request_check_update.emit()
+
+    def show_update_result(self, result):
+        """主程序检查完成后回调（已在 Qt 主线程）。"""
+        import webbrowser
+
+        self.btn_update.setEnabled(True)
+        if result.get("error"):
+            self.update_result.setText(f"检查失败：{result['error']}")
+            return
+        if result.get("has_update"):
+            self.update_result.setText(f"发现新版本 {result['latest']}（当前 v{__version__}）")
+            if QMessageBox.question(
+                self, "发现新版本",
+                f"最新版本 {result['latest']} 已发布（当前 v{__version__}）。\n是否打开下载页面？",
+            ) == QMessageBox.Yes:
+                webbrowser.open(result["url"])
+        else:
+            self.update_result.setText(f"已是最新版本（v{__version__}）")
+
+    def refresh_info(self, device_name=""):
+        self.info_hotkey.setText(self.cfg.get("hotkey", "alt+t"))
+        self.info_device.setText(device_name or "默认扬声器 (loopback)")
+        w = self.cfg["whisper"]
+        self.info_model.setText(f"{w.get('model_size')} / {w.get('device')}")
+        order = self.cfg["translator"].get("order", [])
+        names = [BACKENDS.get(n, (n, ""))[0].split("（")[0] for n in order]
+        self.info_backend.setText(" → ".join(names))
+
+    def showEvent(self, event):
+        self.refresh_info()
+        self._refresh_log()
+        if self.chk_autolog.isChecked():
+            self._log_timer.start()
+        super().showEvent(event)
+
+    def hideEvent(self, event):
+        self._log_timer.stop()
+        # 实时预览过但没点“保存并应用”→ 还原为已保存的外观
+        if self._live_dirty:
+            self._live_dirty = False
+            saved = dict(self.SUBTITLE_DEFAULTS)
+            saved.update(self.cfg["subtitle"])
+            self.request_live_preview.emit(saved)
+        super().hideEvent(event)
+
+    def closeEvent(self, event):
+        event.ignore()
+        self.hide()
+
+    def _refresh_log(self):
+        path = os.path.join(base_dir(), "app.log")
+        if not os.path.exists(path):
+            self.log_view.setPlainText("（暂无日志）")
+            return
+        with open(path, encoding="utf-8", errors="replace") as f:
+            f.seek(0, os.SEEK_END)
+            size = f.tell()
+            f.seek(max(0, size - 100 * 1024))
+            content = f.read()
+        scroll_at_bottom = (
+            self.log_view.verticalScrollBar().value()
+            >= self.log_view.verticalScrollBar().maximum() - 10
+        )
+        self.log_view.setPlainText(content)
+        if scroll_at_bottom:
+            bar = self.log_view.verticalScrollBar()
+            bar.setValue(bar.maximum())
+
+    def _clear_log(self):
+        if QMessageBox.question(self, "清空日志", "确定清空 app.log 吗？") != QMessageBox.Yes:
+            return
+        # 通过日志 handler 安全清空：先关闭流再截断重开，避免写入位置错乱
+        import logging
+
+        for h in logging.root.handlers:
+            if getattr(h, "baseFilename", "").endswith("app.log"):
+                h.acquire()
+                try:
+                    h.close()
+                    open(h.baseFilename, "w", encoding="utf-8").close()
+                    h.stream = open(h.baseFilename, h.mode, encoding=h.encoding)
+                finally:
+                    h.release()
+        self._refresh_log()
+
+    def _on_apply(self):
+        cfg = self.cfg
+        s = cfg["subtitle"]
+        s["font_size"] = self.spin_font.value()
+        s["bg_alpha"] = self.slider_alpha.value()
+        s["width"] = self.spin_width.value()
+        s["fade_ms"] = self.spin_fade.value()
+        s["click_through"] = self.chk_through.isChecked()
+        s["x"] = self.spin_x.value()
+        s["y"] = self.spin_y.value()
+        s["zh_color"] = self._zh_color
+        s["src_color"] = self._src_color
+
+        lang = cfg.get("language")
+        if lang is None:
+            cfg["language"] = lang = {}
+        lang["source"] = self.combo_src_lang.currentData()
+        lang["target"] = self.combo_tgt_lang.currentData()
+
+        ui = cfg.get("ui")
+        if ui is None:
+            cfg["ui"] = ui = {}
+        ui["font_size"] = self.spin_ui_font.value()
+
+        w = cfg["whisper"]
+        w["model_size"] = self.combo_model.currentText()
+        w["device"] = self.combo_device.currentText()
+        w["compute_type"] = self.combo_compute.currentText()
+        w["beam_size"] = self.spin_beam.value()
+
+        t = cfg["translator"]
+        t["order"] = [
+            self.order_list.item(i).data(Qt.UserRole)
+            for i in range(self.order_list.count())
+            if self.order_list.item(i).checkState() == Qt.Checked
+        ]
+        t["nllb_device"] = self.combo_nllb.currentText()
+        t["llm_api"]["base_url"] = self.edit_base_url.text().strip()
+        t["llm_api"]["api_key"] = self.edit_api_key.text().strip()
+        t["llm_api"]["model"] = self.edit_model.text().strip()
+
+        self._live_dirty = False
+        self.request_apply.emit(cfg)
+
+
+if __name__ == "__main__":
+    # 独立预览界面用
+    import yaml
+
+    with open("config.yaml", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+    app = QApplication(sys.argv)
+    win = SettingsWindow(cfg)
+    win.show()
+    sys.exit(app.exec_())
