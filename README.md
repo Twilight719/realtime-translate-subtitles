@@ -44,7 +44,14 @@ GPU（NVIDIA）可跑 `cuda`；纯 CPU 把设置里的运行设备改为 `cpu`�
 build.bat
 ```
 
-输出在 `dist\实时翻译字幕\`。注意：**项目路径不能含中文**（PyInstaller 的 Qt 插件探测不支持），可用目录联接绕过：`mklink /J C:\rt-subtitle D:\你的中文路径`，从联接路径构建。
+输出在 `dist\实时翻译字幕\`。注意：**项目路径不能含中文**（Qt 在中文路径下会算出错误的插件目录导致打包失败；目录联接 junction 无效，venv 会解析回真实路径）。如果项目在中文路径，先整目录复制到纯英文路径再构建：
+
+```bat
+robocopy "D:\翻译插件" "C:\rtbuild" /E /XD "D:\翻译插件\.git" "D:\翻译插件\dist" "D:\翻译插件\build" "D:\翻译插件\models" __pycache__ /XF "*.log"
+cd /d C:\rtbuild && build.bat
+```
+
+（排除目录要写绝对路径，只写 `models` 会把 venv 里所有同名目录一并排除。）
 
 ## 检查更新
 

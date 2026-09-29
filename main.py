@@ -1,5 +1,9 @@
 """入口：装配音频捕获 → VAD → whisper → 翻译 → 字幕窗，含快捷键与托盘。"""
 
+import faulthandler
+
+faulthandler.enable()  # 原生崩溃时打印 Python 调用栈（打包版排查用）
+
 import os
 import queue
 import sys
