@@ -27,6 +27,15 @@ os.environ.setdefault("HF_HUB_DISABLE_XET", "1")
 import onnxruntime  # noqa: F401
 import faster_whisper  # noqa: F401
 
+# 本机代理/杀毒软件可能拦截 TLS 并换发自签证书，Python 内置 certifi 不认；
+# 改用 Windows 系统证书库校验（检查更新、模型下载等都受益）
+try:
+    import truststore
+
+    truststore.inject_into_ssl()
+except ImportError:
+    pass
+
 # 让 ctranslate2 找到 pip 安装的 cuBLAS/cuDNN DLL（GPU 推理必需）。
 # 直接用完整路径预加载，之后 ctranslate2 按名称 LoadLibrary 即可命中已加载模块。
 import ctypes as _ctypes
@@ -412,14 +421,21 @@ class MainApp:
         self.tray = TrayIcon(on_toggle=self.toggle, on_quit=self.quit, on_settings=self.open_settings)
         self.tray.show()
 
-        self.hotkeys = HotkeyManager(
-            app=self.app, hotkey=self.cfg.get("hotkey", "alt+t"), on_toggle=self.toggle
-        )
-        self.hotkeys.start()
+        self.hotkeys = None
+        try:
+            self.hotkeys = HotkeyManager(
+                app=self.app, hotkey=self.cfg.get("hotkey", "alt+t"), on_toggle=self.toggle
+            )
+            self.hotkeys.start()
+        except Exception as e:
+            # 热键被占用（如另一个实例在运行）不应让程序退出，托盘/设置页仍可操作
+            log.warning("全局热键注册失败: %s", e)
 
         hotkey = self.cfg.get("hotkey", "alt+t")
+        tip = (f"按 {hotkey} 开始监听，右键托盘打开设置" if self.hotkeys
+               else f"热键 {hotkey} 被占用（是否有另一个实例在运行？），可右键托盘操作")
         self.tray.showMessage(
-            "实时翻译字幕", f"按 {hotkey} 开始监听，右键托盘打开设置",
+            "实时翻译字幕", tip,
             QSystemTrayIcon.Information, 3000,
         )
 
@@ -536,7 +552,8 @@ class MainApp:
 
     def quit(self):
         self.pipeline.stop()
-        self.hotkeys.stop()
+        if self.hotkeys is not None:
+            self.hotkeys.stop()
         self.app.quit()
 
     def run(self):

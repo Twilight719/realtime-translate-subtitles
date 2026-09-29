@@ -12,3 +12,4 @@ PyYAML>=6.0
 ruamel.yaml>=0.18
 deep-translator>=1.11
 requests>=2.31
+truststore>=0.10
