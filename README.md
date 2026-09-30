@@ -59,6 +59,8 @@ cd /d C:\rtbuild && build.bat
 
 设置 → 主页 → 关于 → 「检查更新」，对比 GitHub Releases 最新版本号，有新版本可一键打开下载页。
 
+每个版本的详细变化见 [更新日志](CHANGELOG.md)。
+
 ## 技术栈
 
 faster-whisper（语音识别）· silero VAD（语音切分）· PyQt5（界面）· soundcard（音频回采）· CTranslate2/NLLB（离线翻译）

@@ -52,6 +52,8 @@ Output goes to `dist\实时翻译字幕\`. Note: **the project path must not con
 
 Settings → Home → About → "检查更新" compares against the latest GitHub Release and offers to open the download page.
 
+See [CHANGELOG.md](CHANGELOG.md) for per-version release notes (Chinese + English).
+
 ## Tech stack
 
 faster-whisper (ASR) · silero VAD (speech segmentation) · PyQt5 (UI) · soundcard (loopback capture) · CTranslate2/NLLB (offline translation)
