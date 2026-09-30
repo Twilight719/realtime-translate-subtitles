@@ -288,6 +288,10 @@ class Pipeline:
     def _load_models_safe(self):
         try:
             self._ensure_models()
+            # 加载完成后告知用户（首次下载模型可能需要几分钟，之前没有任何就绪提示）
+            if self._cap is not None:
+                log.info("模型已就绪")
+                self.on_subtitle({"kind": "info", "zh": "模型已就绪，开始监听"})
         except Exception as e:
             self._model_error = e
             self._model_ready.set()
@@ -451,7 +455,10 @@ class MainApp:
         self.bridge.subtitle_received.emit(payload)
 
     def _on_subtitle(self, payload):
-        if payload.get("kind") == "final":
+        if payload.get("kind") == "info":
+            # 状态提示（如"模型已就绪"）：只上屏，不计入字幕统计
+            self.window.update_text("", payload["zh"])
+        elif payload.get("kind") == "final":
             self.subtitle_count += 1
             if self.settings_window is not None:
                 self.settings_window.set_subtitle_count(self.subtitle_count)
@@ -547,11 +554,14 @@ class MainApp:
                 self.pipeline.start()
                 self.tray.set_running(True)
                 if not self.pipeline.models_ready:
-                    # 模型未就绪时先给用户明确反馈（首次运行要下载约 460MB 识别模型）
+                    # 模型未就绪时先给用户明确反馈（首次运行要下载约 460MB 识别模型），
+                    # 就绪后 Pipeline 会再发一条"模型已就绪"提示
                     self.window.update_text(
                         "", "正在加载模型…（首次运行需下载识别模型约 460MB，请保持网络畅通）"
                     )
-                log.info("已开始监听（首次启动需加载模型，请稍候）")
+                    log.info("已开始监听，模型加载中（首次需下载约 460MB）")
+                else:
+                    log.info("已开始监听")
             if self.settings_window is not None:
                 self.settings_window.set_running(self.pipeline.running)
         except Exception as e:

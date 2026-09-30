@@ -6,6 +6,17 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.4] - 2026-09-30
+
+### 优化 / Changed
+
+- **模型就绪提示**：模型加载完成后字幕条会显示"模型已就绪，开始监听"，不再需要猜测什么时候加载完。
+  The subtitle bar now shows a "model ready, listening" message once model loading finishes.
+- **日志不再误导**：之前每次按开始监听，日志都会写一句"首次启动需加载模型"（实际模型早已加载好）；现在只在真正加载模型时才记录"模型加载中"，模型已在内存时直接记"已开始监听"。
+  The log previously printed "first-run model loading" on every start even when models were already loaded; it now only mentions loading when a load is actually happening.
+
+---
+
 ## [v1.0.3] - 2026-09-30
 
 ### 新增 / Added
@@ -70,6 +81,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.4]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.4
 [v1.0.3]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.3
 [v1.0.2]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.2
 [v1.0.1]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.1
