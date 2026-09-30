@@ -50,5 +50,13 @@ def check_update(timeout=8):
         }
     except requests.RequestException as e:
         log.warning("检查更新失败: %s", e)
+        if isinstance(e, requests.exceptions.SSLError):
+            msg = "网络请求失败：HTTPS 证书校验未通过（如开着代理或杀毒软件拦截，请检查其设置）"
+        elif isinstance(e, requests.exceptions.Timeout):
+            msg = "网络请求失败：连接 GitHub 超时"
+        elif isinstance(e, requests.exceptions.ConnectionError):
+            msg = "网络请求失败：无法连接 GitHub（请检查网络或代理）"
+        else:
+            msg = f"网络请求失败：{type(e).__name__}"
         return {"has_update": False, "latest": None, "url": GITHUB_RELEASES_URL,
-                "error": f"网络请求失败: {e}"}
+                "error": msg}

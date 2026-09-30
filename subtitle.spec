@@ -43,7 +43,7 @@ a = Analysis(
     hiddenimports=(
         collect_submodules("ctranslate2")
         + collect_submodules("faster_whisper")
-        + ["sentencepiece"]
+        + ["sentencepiece", "truststore"]  # truststore：打包后仍能走系统证书库，否则检查更新报证书错误
     ),
     hookspath=[],
     runtime_hooks=["tools/pyi_rth_preload.py"],  # 须在 PyQt5 rthook 之前预加载原生库
