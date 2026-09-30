@@ -193,7 +193,10 @@ class Pipeline:
         self._cap = None
         self._threads = []
         self._stop = threading.Event()
-        self._seg_q = queue.Queue(maxsize=8)
+        # 定稿段落：有序、容量小，满时丢弃最旧的（优先跟上当前语音，避免延迟越积越多）
+        self._seg_q = queue.Queue(maxsize=3)
+        # 实时快照：容量 1，永远只留最新一条（旧快照是同一段话的过期识别，处理它纯属浪费）
+        self._partial_q = queue.Queue(maxsize=1)
         self._model_lock = threading.Lock()
         self._model_ready = threading.Event()
         self._model_error = None
@@ -257,6 +260,22 @@ class Pipeline:
             pass
         self._threads = []
 
+    @staticmethod
+    def _put_latest(q, item, kind):
+        """队列满时丢弃最旧的、放入最新的——宁可跳句也不让字幕越落越远。"""
+        try:
+            q.put_nowait(item)
+        except queue.Full:
+            try:
+                q.get_nowait()
+                log.warning("处理跟不上语速，丢弃最旧的%s，优先处理最新语音", kind)
+            except queue.Empty:
+                pass
+            try:
+                q.put_nowait(item)
+            except queue.Full:
+                pass
+
     @property
     def running(self):
         return self._cap is not None
@@ -299,16 +318,16 @@ class Pipeline:
             self._model_ready.set()
 
     def _enqueue_segment(self, segment):
-        self._enqueue((segment, False))
+        # 段落定稿后，滞留的旧快照（同一段话的过期识别）已无意义，清掉
+        while True:
+            try:
+                self._partial_q.get_nowait()
+            except queue.Empty:
+                break
+        self._put_latest(self._seg_q, (segment, False), "语音段落")
 
     def _enqueue_partial(self, segment):
-        self._enqueue((segment, True))
-
-    def _enqueue(self, item):
-        try:
-            self._seg_q.put_nowait(item)
-        except queue.Full:
-            pass
+        self._put_latest(self._partial_q, (segment, True), "实时快照")
 
     def _vad_loop(self, segmenter):
         cap = self._cap
@@ -359,10 +378,14 @@ class Pipeline:
             lambda t, lang: self._translator.translate(t, lang, self._target_lang())
         )
         while not self._stop.is_set():
+            # 优先处理定稿段落（要挪入历史行）；没有定稿再取最新快照
             try:
-                item = self._seg_q.get(timeout=0.2)  # 超时轮询，保证 _stop 能即时生效
+                item = self._seg_q.get_nowait()
             except queue.Empty:
-                continue
+                try:
+                    item = self._partial_q.get(timeout=0.2)  # 超时轮询，保证 _stop 能即时生效
+                except queue.Empty:
+                    continue
             if item is None:
                 break
             seg, is_partial = item

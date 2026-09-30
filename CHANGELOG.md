@@ -6,6 +6,19 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.6] - 2026-09-30
+
+### 修复 / Fixed
+
+- **字幕延迟越积越多**：之前所有待处理语音排在同一个队列里（最多 8 条，每条最长 10 秒），一旦某条处理慢了，队列逐渐堆满，积压的旧段落仍按顺序慢慢上屏，导致字幕落后视频越来越多。现在：
+  - 实时快照队列容量为 1，新快照直接替换旧快照（旧快照是同一段话的过期识别，处理它纯属浪费）
+  - 定稿段落单独一个小队列（3 条），满了丢弃**最旧的**而不是最新的，宁可跳句也不让字幕越落越远
+  - 段落定稿时自动清掉它之前滞留的过期快照
+  - 发生丢弃时日志会记录"处理跟不上语速"，方便排查
+  Subtitle lag no longer accumulates: live snapshots now keep only the newest one (older snapshots of the same utterance are worthless), finalized segments use a small drop-oldest queue, and stale snapshots are purged when a segment finalizes.
+
+---
+
 ## [v1.0.5] - 2026-09-30
 
 ### 新增 / Added
@@ -99,6 +112,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.6]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.6
 [v1.0.5]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.5
 [v1.0.4]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.4
 [v1.0.3]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.3
