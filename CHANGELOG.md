@@ -6,6 +6,21 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.8] - 2026-09-30
+
+### 修复 / Fixed
+
+- **MyMemory 后端永远失败**：whisper 给的是 en/zh 短语言码，MyMemory 要求 en-US/zh-CN 格式，导致该后端一直报 "No support for the provided language"，从未成功过。已修正语言码映射。
+  MyMemory backend never worked: whisper's short language codes (en) are now mapped to MyMemory's format (en-US).
+- **有道频繁触发限流（411 请求频率过快）**：实时快照每 0.8 秒都会翻译一次尾部文字，即使尾部没变也重复请求。现在尾部内容不变时直接复用上次译文，大幅减少在线翻译请求量。
+  Live snapshots no longer re-translate an unchanged tail, greatly reducing online translation calls that were tripping Youdao's rate limit.
+- **NLLB 离线模型下载偶发失败**：下载失败时现在会记录完整错误堆栈，并 5 秒后自动重试一次。
+  NLLB model download failures now log a full traceback and retry once automatically.
+- **日志查看时滚动条被弹回顶部**：日志页每 2 秒自动刷新会重置滚动位置。现在翻阅历史时保持你的滚动位置，只有停在底部时才跟随最新日志。
+  Log viewer no longer resets the scroll position on auto-refresh while you're reading history; it only follows new entries when you're already at the bottom.
+
+---
+
 ## [v1.0.7] - 2026-09-30
 
 ### 修复 / Fixed
@@ -128,6 +143,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.8]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.8
 [v1.0.7]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.7
 [v1.0.6]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.6
 [v1.0.5]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.5

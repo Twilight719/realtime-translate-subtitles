@@ -15,6 +15,7 @@ class MyMemoryTranslator(Translator):
     def translate(self, text, src_lang, target="zh"):
         from deep_translator import MyMemoryTranslator as _MM
 
-        # MyMemory 不支持 auto，须显式给源语言（whisper 已检测出语言码）
-        translator = _MM(source=src_lang or "en", target=MM_TARGET.get(target, "zh-CN"))
+        # MyMemory 不支持 auto，且语言码要用 zh-CN/en-US 形式（whisper 给的是 zh/en 短码）
+        source = MM_TARGET.get(src_lang or "", "en-US")
+        translator = _MM(source=source, target=MM_TARGET.get(target, "zh-CN"))
         return translator.translate(text)

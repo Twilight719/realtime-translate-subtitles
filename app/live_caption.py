@@ -18,6 +18,8 @@ class LiveCaptionState:
         self.prev_text = ""
         self.confirmed_src = ""
         self.confirmed_zh = ""
+        self._last_tail_src = None  # 尾部缓存：快照间隔内尾部往往没变，避免重复请求在线翻译（会触发限流）
+        self._last_tail_zh = ""
 
     @staticmethod
     def _common_prefix(a, b, spaced):
@@ -49,7 +51,15 @@ class LiveCaptionState:
             self.confirmed_src = cp
 
         tail_src = text[len(self.confirmed_src):].strip()
-        tail_zh = self._safe_translate(tail_src, lang) if tail_src else ""
+        if tail_src:
+            if tail_src == self._last_tail_src:
+                tail_zh = self._last_tail_zh
+            else:
+                tail_zh = self._safe_translate(tail_src, lang)
+                self._last_tail_src, self._last_tail_zh = tail_src, tail_zh
+        else:
+            tail_zh = ""
+            self._last_tail_src = None
         self.prev_text = text
 
         return {

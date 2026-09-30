@@ -26,10 +26,18 @@ WHISPER_TO_NLLB = {
 
 def _ensure_model(model_dir=MODEL_DIR):
     if not os.path.exists(os.path.join(model_dir, "model.bin")):
+        import time
+
         from huggingface_hub import snapshot_download
 
         log.info("首次使用离线翻译，需下载 NLLB 模型（约 600MB），请保持网络畅通...")
-        snapshot_download(MODEL_ID, local_dir=model_dir)
+        try:
+            snapshot_download(MODEL_ID, local_dir=model_dir)
+        except Exception:
+            # 镜像偶发失败：记完整堆栈，5 秒后自动重试一次；再失败交给上层熔断
+            log.exception("NLLB 模型下载失败，5 秒后重试一次")
+            time.sleep(5)
+            snapshot_download(MODEL_ID, local_dir=model_dir)
     return model_dir
 
 

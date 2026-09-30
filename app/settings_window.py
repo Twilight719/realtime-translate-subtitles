@@ -812,14 +812,16 @@ class SettingsWindow(QMainWindow):
             size = f.tell()
             f.seek(max(0, size - 100 * 1024))
             content = f.read()
-        scroll_at_bottom = (
-            self.log_view.verticalScrollBar().value()
-            >= self.log_view.verticalScrollBar().maximum() - 10
-        )
+        bar = self.log_view.verticalScrollBar()
+        scroll_at_bottom = bar.value() >= bar.maximum() - 10
+        saved_pos = bar.value()
         self.log_view.setPlainText(content)
         if scroll_at_bottom:
-            bar = self.log_view.verticalScrollBar()
+            # 一直在底部 = 在追最新日志，继续跟住最新
             bar.setValue(bar.maximum())
+        else:
+            # 用户正在翻阅历史：恢复原位置，不被刷新打断
+            bar.setValue(saved_pos)
 
     def _clear_log(self):
         if QMessageBox.question(self, "清空日志", "确定清空 app.log 吗？") != QMessageBox.Yes:
