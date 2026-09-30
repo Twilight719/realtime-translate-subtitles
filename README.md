@@ -67,4 +67,6 @@ faster-whisper（语音识别）· silero VAD（语音切分）· PyQt5（界面
 
 ## 许可证
 
-MIT
+MIT（见 [LICENSE](LICENSE)）。
+
+**作者：[Twilight719](https://github.com/Twilight719)**。欢迎参考、借鉴或二次开发，但请在你的项目说明中**标明原作者和本仓库地址**（例如"基于 [realtime-translate-subtitles](https://github.com/Twilight719/realtime-translate-subtitles) 开发"），并保留 LICENSE 中的版权声明——这也是 MIT 协议本身的要求。

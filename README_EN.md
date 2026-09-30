@@ -60,4 +60,6 @@ faster-whisper (ASR) · silero VAD (speech segmentation) · PyQt5 (UI) · soundc
 
 ## License
 
-MIT
+MIT (see [LICENSE](LICENSE)).
+
+**Author: [Twilight719](https://github.com/Twilight719)**. Feel free to learn from, adapt, or build upon this project — but please **credit the original author and link back to this repository** in your project's documentation (e.g. "Based on [realtime-translate-subtitles](https://github.com/Twilight719/realtime-translate-subtitles)"), and keep the copyright notice in LICENSE, as required by the MIT License.

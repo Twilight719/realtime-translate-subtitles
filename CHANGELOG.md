@@ -6,6 +6,17 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.3] - 2026-09-30
+
+### 新增 / Added
+
+- **创作者署名**：设置页"关于"区域新增作者（Twilight719）与 GitHub 仓库链接（可点击跳转）。
+  Settings → About now shows the author (Twilight719) and a clickable link to the GitHub repository.
+- **开源协议文件**：补充 MIT LICENSE 文件；README 明确：借鉴或二次开发请标明原作者与仓库地址。
+  Added the MIT LICENSE file; READMEs now ask that adaptations and derivative works credit the original author and link back to this repository.
+
+---
+
 ## [v1.0.2] - 2026-09-30
 
 ### 修复 / Fixed
@@ -59,6 +70,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.3]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.3
 [v1.0.2]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.2
 [v1.0.1]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.1
 [v1.0.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.0

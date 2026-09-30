@@ -311,6 +311,14 @@ class SettingsWindow(QMainWindow):
         about = QGroupBox("关于")
         af = QFormLayout(about)
         af.addRow("当前版本", QLabel(f"v{__version__}"))
+        author = QLabel(
+            '作者：<a href="https://github.com/Twilight719">Twilight719</a>'
+            '　·　开源地址：<a href="https://github.com/Twilight719/realtime-translate-subtitles">GitHub</a>'
+            '　·　MIT 协议'
+        )
+        author.setObjectName("hint")
+        author.setOpenExternalLinks(True)
+        af.addRow("创作者", author)
         update_row = QHBoxLayout()
         self.btn_update = QPushButton("检查更新")
         self.btn_update.clicked.connect(self._on_check_update)
