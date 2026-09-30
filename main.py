@@ -63,6 +63,7 @@ for _root in dict.fromkeys(_cuda_roots):
 
 from PyQt5.QtCore import QObject, QCoreApplication, pyqtSignal
 from PyQt5.QtGui import QIcon
+from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
 
 # Qt 5.15 在中文路径下会把插件目录错算成 "????"，需显式注册插件路径
@@ -475,6 +476,12 @@ class MainApp:
             pass
         self.app = QApplication(sys.argv)
         self.app.setQuitOnLastWindowClosed(False)
+
+        # 单实例：已有一个实例在运行时，通知它弹出设置页，本进程直接退出。
+        # 否则多开实例会互抢全局热键（只有第一个能注册上 alt+t），用户看到的就是
+        # "热键被占用"——占用的其实是自己多开的那个。
+        if self._activate_existing_instance():
+            sys.exit(0)
         # 应用图标：任务栏、标题栏、设置窗口统一使用
         _icon = resource_path(os.path.join("assets", "icon.ico"))
         if os.path.exists(_icon):
@@ -512,6 +519,42 @@ class MainApp:
             "实时翻译字幕", tip,
             QSystemTrayIcon.Information, 3000,
         )
+
+        self._start_instance_server()
+
+    _INSTANCE_KEY = "realtime-translate-subtitles-single-instance"
+
+    @classmethod
+    def _activate_existing_instance(cls):
+        """尝试联系已运行的实例。联系成功（=已有实例）返回 True。"""
+        sock = QLocalSocket()
+        sock.connectToServer(cls._INSTANCE_KEY)
+        if not sock.waitForConnected(300):
+            return False
+        sock.write(b"show-settings")
+        sock.flush()
+        sock.waitForBytesWritten(300)
+        log.info("已有实例在运行，已通知它打开设置页，本实例退出")
+        return True
+
+    def _start_instance_server(self):
+        self._instance_server = QLocalServer(self.app)
+        # 清理上次异常退出可能残留的通道（Windows 上通常无残留，保险起见）
+        QLocalServer.removeServer(self._INSTANCE_KEY)
+        if not self._instance_server.listen(self._INSTANCE_KEY):
+            # 极端情况：两个进程几乎同时启动，都没连上又都来监听 → 后到的退出
+            log.warning("单实例通道创建失败，可能有另一个实例正在启动，本实例退出")
+            sys.exit(0)
+        self._instance_server.newConnection.connect(self._on_second_instance)
+
+    def _on_second_instance(self):
+        """后续实例启动时：消耗掉连接，把设置页弹到前台。"""
+        while self._instance_server.hasPendingConnections():
+            conn = self._instance_server.nextPendingConnection()
+            conn.waitForReadyRead(100)
+            conn.disconnectFromServer()
+        log.info("检测到重复启动，改为打开设置页")
+        self.open_settings()
 
     def _emit_subtitle(self, payload):
         self.bridge.subtitle_received.emit(payload)

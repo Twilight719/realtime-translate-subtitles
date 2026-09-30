@@ -6,6 +6,22 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.9] - 2026-09-30
+
+### 新增 / Added
+
+- **单实例运行**：重复双击快捷方式不再开出多个软件窗口，而是把已运行实例的设置页弹到前台（和其他桌面软件行为一致）。
+  Single-instance: launching the app again now brings the running instance's settings window to the front instead of spawning a second copy.
+
+### 修复 / Fixed
+
+- **"热键被占用"误报**：之前多开的每个实例都会抢同一个全局热键，只有第一个能注册成功，其余实例报"alt+t 被其他程序占用"——占用的其实是自己。单实例化后此问题消除。
+  The "hotkey alt+t is occupied" warning was caused by duplicate instances of this app competing for the same global hotkey. Single-instance enforcement removes the conflict.
+- **模型加载失败：Requested float16 compute type...**：当 GPU 后端本次不可用（驱动/显存/缺库）时，float16 不被支持，旧版直接报错罢工。现在自动降级：同设备 int8 → CPU int8，并在日志中记录降级过程。
+  Whisper model loading now falls back automatically (float16 → int8 → CPU int8) instead of failing outright when the GPU backend is unavailable.
+
+---
+
 ## [v1.0.8] - 2026-09-30
 
 ### 修复 / Fixed
@@ -143,6 +159,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.9]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.9
 [v1.0.8]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.8
 [v1.0.7]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.7
 [v1.0.6]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.6
