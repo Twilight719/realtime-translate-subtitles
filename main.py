@@ -193,6 +193,7 @@ class Pipeline:
         self._cap = None
         self._threads = []
         self._stop = threading.Event()
+        self._gen = 0  # 代数标记：旧线程发现代数变了立即退出，防止僵尸线程抢任务
         # 定稿段落：有序、容量小，满时丢弃最旧的（优先跟上当前语音，避免延迟越积越多）
         self._seg_q = queue.Queue(maxsize=3)
         # 实时快照：容量 1，永远只留最新一条（旧快照是同一段话的过期识别，处理它纯属浪费）
@@ -221,6 +222,13 @@ class Pipeline:
         if self._cap is not None:
             return
         self._stop.clear()
+        # 清空队列里的残留：上次停止时可能留有旧语音，混入会造成识别错乱
+        for q in (self._seg_q, self._partial_q):
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
         threading.Thread(target=self._load_models_safe, daemon=True).start()
         self._cap = AudioCapture(device=pick_device(self.cfg["audio"].get("device_name")))
         self._cap.start()
@@ -241,9 +249,11 @@ class Pipeline:
             max_segment_s=v.get("max_segment_s", 10),
             partial_interval_s=v.get("partial_interval_s", 0.8),
         )
+        self._gen += 1
+        gen = self._gen
         self._threads = [
-            threading.Thread(target=self._vad_loop, args=(segmenter,), daemon=True),
-            threading.Thread(target=self._worker_loop, daemon=True),
+            threading.Thread(target=self._vad_loop, args=(segmenter, gen), daemon=True),
+            threading.Thread(target=self._worker_loop, args=(gen,), daemon=True),
         ]
         for t in self._threads:
             t.start()
@@ -254,10 +264,11 @@ class Pipeline:
         self._stop.set()
         self._cap.stop()
         self._cap = None
-        try:
-            self._seg_q.put_nowait(None)  # 非阻塞：队列满时工作线程靠 _stop 标志退出
-        except queue.Full:
-            pass
+        # 等工作线程真正退出（它们每 0.2s 轮询一次 _stop，很快）：
+        # 不能用往队列塞 None 的方式通知——残留的 None 会被下次 start 的新线程
+        # 立刻吃掉并退出，导致流水线无声坏死（历史上真实发生过的 bug）
+        for t in self._threads:
+            t.join(timeout=2)
         self._threads = []
 
     @staticmethod
@@ -329,10 +340,18 @@ class Pipeline:
     def _enqueue_partial(self, segment):
         self._put_latest(self._partial_q, (segment, True), "实时快照")
 
-    def _vad_loop(self, segmenter):
+    def _vad_loop(self, segmenter, gen):
+        try:
+            self._vad_loop_inner(segmenter, gen)
+        except Exception:
+            log.exception("VAD 线程意外退出！请把此日志反馈给开发者")
+        finally:
+            log.info("VAD 线程已退出")
+
+    def _vad_loop_inner(self, segmenter, gen):
         cap = self._cap
         last_check = time.time()
-        while not self._stop.is_set():
+        while not self._stop.is_set() and self._gen == gen:
             # 每 2 秒检查默认输出设备是否变化（如插拔耳机），变了就自动切换监听源
             if self._speaker_id is not None and time.time() - last_check > 2:
                 last_check = time.time()
@@ -365,7 +384,17 @@ class Pipeline:
     def _target_lang(self):
         return (self.cfg.get("language") or {}).get("target", "zh")
 
-    def _worker_loop(self):
+    def _worker_loop(self, gen):
+        try:
+            self._worker_loop_inner(gen)
+        except Exception:
+            # 线程意外死亡 = 流水线无声坏死（不出字幕且无日志），必须留下痕迹
+            log.exception("识别工作线程意外退出！请把此日志反馈给开发者")
+            self.on_subtitle({"kind": "info", "zh": "内部错误：识别线程异常退出，请停止后重新开始"})
+        finally:
+            log.info("识别工作线程已退出")
+
+    def _worker_loop_inner(self, gen):
         # 等待模型加载完成（首次启动需要下载模型，可能要几分钟）
         self._model_ready.wait()
         if self._model_error is not None:
@@ -377,7 +406,7 @@ class Pipeline:
         live = LiveCaptionState(
             lambda t, lang: self._translator.translate(t, lang, self._target_lang())
         )
-        while not self._stop.is_set():
+        while not self._stop.is_set() and self._gen == gen:
             # 优先处理定稿段落（要挪入历史行）；没有定稿再取最新快照
             try:
                 item = self._seg_q.get_nowait()
@@ -386,8 +415,6 @@ class Pipeline:
                     item = self._partial_q.get(timeout=0.2)  # 超时轮询，保证 _stop 能即时生效
                 except queue.Empty:
                     continue
-            if item is None:
-                break
             seg, is_partial = item
             try:
                 tag = "实时快照" if is_partial else "语音片段"

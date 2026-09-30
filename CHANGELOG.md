@@ -6,6 +6,22 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.7] - 2026-09-30
+
+### 修复 / Fixed
+
+- **停止后再开始可能永远不出字幕（严重）**：旧版"停止监听"会往任务队列里塞一个结束标记；这个标记如果没被及时消费掉，下次"开始监听"时新线程会立刻把它吃掉并退出——之后所有语音都进队列但无人处理，表现为字幕完全不出现、日志只剩丢弃警告。现在停止时改为等待线程自然退出，启动时清空队列残留，从根上消除这个问题。
+  Fixed a critical bug where toggling stop→start could permanently break subtitles: a leftover stop-marker in the queue was immediately consumed by the new worker thread, killing it. Stop now waits for threads to exit, and start purges queue leftovers.
+- **线程意外死亡无痕迹**：VAD 线程和识别线程增加了崩溃日志与退出日志；识别线程异常退出时字幕条会提示"请停止后重新开始"。
+  VAD/worker threads now log unexpected exits, and the subtitle bar warns if the worker thread dies.
+
+### 排查工具 / Internal
+
+- 流水线线程增加"代数"标记：重启后旧线程即使因长任务滞留也会自动退出，不会和新线程抢任务。
+  Pipeline threads carry a generation marker so stale threads from a previous session retire themselves.
+
+---
+
 ## [v1.0.6] - 2026-09-30
 
 ### 修复 / Fixed
@@ -112,6 +128,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.7]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.7
 [v1.0.6]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.6
 [v1.0.5]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.5
 [v1.0.4]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.4
