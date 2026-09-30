@@ -48,7 +48,8 @@ class FallbackTranslator(Translator):
         self.backends = backends
         self._failed_at = {}  # backend -> 上次失败时间戳
 
-    def translate(self, text, src_lang, target="zh"):
+    def translate(self, text, src_lang, target="zh", on_delta=None):
+        """on_delta(累计译文) 非 None 时，支持流式的后端会逐段回调（观感更实时）。"""
         if src_lang and src_lang == target:
             return text  # 源语言与目标语言相同，无需翻译
         now = time.time()
@@ -60,8 +61,9 @@ class FallbackTranslator(Translator):
                 continue  # 冷却中，跳过
             tried_any = True
             try:
-                result = backend.translate(text, src_lang, target)
-                return result
+                if on_delta is not None and getattr(backend, "supports_stream", False):
+                    return backend.translate(text, src_lang, target, on_delta=on_delta)
+                return backend.translate(text, src_lang, target)
             except Exception as e:
                 self._failed_at[backend] = time.time()
                 log.warning("翻译后端 %s 失败（冷却 %ds）: %s", backend.name, COOLDOWN_S, e)
@@ -70,6 +72,8 @@ class FallbackTranslator(Translator):
             # 全部在冷却中：仍按顺序尝试一次，避免长时间无翻译
             for backend in self.backends:
                 try:
+                    if on_delta is not None and getattr(backend, "supports_stream", False):
+                        return backend.translate(text, src_lang, target, on_delta=on_delta)
                     return backend.translate(text, src_lang, target)
                 except Exception as e:
                     self._failed_at[backend] = time.time()

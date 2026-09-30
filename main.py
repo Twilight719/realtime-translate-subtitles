@@ -112,9 +112,9 @@ whisper:
 vad:
   threshold: 0.5
   min_speech_ms: 250
-  min_silence_ms: 400
+  min_silence_ms: 250        # 停顿多久判定一句结束（调小出字幕更快，太小会把长句切断）
   max_segment_s: 10        # 连续说话时每段最长秒数（强制切段）
-  partial_interval_s: 1.5  # 说话过程中每隔多少秒出一次实时快照字幕（调小更跟手，翻译请求更频繁）
+  partial_interval_s: 0.8  # 说话过程中每隔多少秒出一次实时快照字幕（调小更跟手，翻译请求更频繁）
 
 language:
   source: auto             # 源语言：auto=自动检测；看单一语言视频可锁定 zh/en/ja/ko/ru，识别更快更准
@@ -133,12 +133,14 @@ translator:
     api_key: ""             # 填 key 后在 order 里加 llm_api 即启用
     model: deepseek-chat
     context_size: 1
+    stream: true            # true=译文逐字上屏（更实时）；false=整句翻完一次性显示
 
 subtitle:
   width: 700
   font_size: 22
   fade_ms: 5000            # 无新字幕多少毫秒后淡出
   click_through: true      # true=点击穿透（不影响游戏）；false=可拖动位置
+  display_mode: both       # both=双语显示；zh=只显示译文；src=只显示原文
   x: 300
   y: 800
   bg_alpha: 140
@@ -232,9 +234,9 @@ class Pipeline:
             on_partial=self._enqueue_partial,
             threshold=v.get("threshold", 0.5),
             min_speech_ms=v.get("min_speech_ms", 250),
-            min_silence_ms=v.get("min_silence_ms", 400),
+            min_silence_ms=v.get("min_silence_ms", 250),
             max_segment_s=v.get("max_segment_s", 10),
-            partial_interval_s=v.get("partial_interval_s", 2.5),
+            partial_interval_s=v.get("partial_interval_s", 0.8),
         )
         self._threads = [
             threading.Thread(target=self._vad_loop, args=(segmenter,), daemon=True),
@@ -379,8 +381,18 @@ class Pipeline:
                     # 段落定稿：整句重译，挪入历史行
                     live.reset()
                     zh = None
+                    target = self._target_lang()
                     try:
-                        zh = self._translator.translate(text, lang, self._target_lang())
+                        llm_cfg = (self.cfg.get("translator") or {}).get("llm_api") or {}
+                        if llm_cfg.get("stream", True):
+                            # 流式：译文逐字上屏（仅支持流式的后端会逐段回调，其余一次返回）
+                            zh = self._translator.translate(
+                                text, lang, target,
+                                on_delta=lambda acc, t=text: self.on_subtitle(
+                                    {"kind": "stream", "src": t, "zh": acc}),
+                            )
+                        else:
+                            zh = self._translator.translate(text, lang, target)
                     except Exception as e:
                         log.warning("翻译整体失败，先显示原文: %s", e)
                     self.on_subtitle({
@@ -458,6 +470,9 @@ class MainApp:
         if payload.get("kind") == "info":
             # 状态提示（如"模型已就绪"）：只上屏，不计入字幕统计
             self.window.update_text("", payload["zh"])
+        elif payload.get("kind") == "stream":
+            # 流式翻译中间态：逐字刷新，定稿后再走 final
+            self.window.update_text(payload["src"], payload["zh"])
         elif payload.get("kind") == "final":
             self.subtitle_count += 1
             if self.settings_window is not None:

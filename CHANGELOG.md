@@ -6,6 +6,24 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.5] - 2026-09-30
+
+### 新增 / Added
+
+- **字幕内容模式**：设置 → 字幕外观新增"字幕内容"选项，可切换 双语显示 / 只显示译文 / 只显示原文，支持实时预览。
+  New "subtitle content" option: bilingual / translation only / original only, with live preview.
+- **大模型流式翻译**：设置 → 翻译服务新增"流式输出"开关（默认开）。开启后译文逐字上屏，不用等整句翻完，观感接近同传。仅当"大模型 API"后端实际承担翻译时生效——想体验它，请把大模型 API 移到后端优先级第一位。
+  New "streaming output" toggle for the LLM API backend (on by default): translations appear word-by-word instead of all at once. Applies when the LLM backend actually handles the translation — move it to the top of the backend priority list to experience it.
+
+### 优化 / Changed
+
+- **翻译连接复用**：大模型 API 翻译改为长连接，每次翻译省 0.2~0.5 秒的握手开销（有道此前已是长连接）。
+  LLM API translation now reuses a persistent HTTP connection, saving 0.2~0.5s of handshake per call.
+- **默认参数调快**：语音停顿判定 400ms → 250ms（句子定稿更快），快照间隔 1.5s → 0.8s（实时字幕更跟手）。已有用户的 config.yaml 不会被覆盖，可在配置文件中手动调整 vad 段。
+  Faster defaults: VAD silence threshold 400ms → 250ms (sentences finalize sooner), snapshot interval 1.5s → 0.8s (more responsive live captions). Existing config.yaml files keep their values — edit the vad section manually if desired.
+
+---
+
 ## [v1.0.4] - 2026-09-30
 
 ### 优化 / Changed
@@ -81,6 +99,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.5]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.5
 [v1.0.4]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.4
 [v1.0.3]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.3
 [v1.0.2]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.2

@@ -39,8 +39,10 @@ class SubtitleWindow(QWidget):
         self._drag_pos = None
         self._font_size = cfg.get("font_size", 22)
         self._last_final_zh = ""
+        self._last_final_src = ""
         self._src_color = cfg.get("src_color", "#FFFFFF")
         self._zh_color = cfg.get("zh_color", "#FFE34D")
+        self._display_mode = cfg.get("display_mode", "both")  # both / zh / src
 
         self.setWindowFlags(
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
@@ -72,6 +74,7 @@ class SubtitleWindow(QWidget):
         self.move(cfg.get("x", 300), cfg.get("y", 800))
 
         self.subtitle_ready.connect(self._show_simple)
+        self._apply_display_mode()
 
         # 淡出计时
         self._opacity = 1.0
@@ -90,6 +93,12 @@ class SubtitleWindow(QWidget):
         self.label_zh.setFont(QFont("Microsoft YaHei", fs, QFont.Bold))
 
     # ---------- 上屏接口（须在 Qt 主线程调用） ----------
+
+    def _apply_display_mode(self):
+        """字幕内容模式：both=双语、zh=只译文、src=只原文。"""
+        self.label_src.setVisible(self._display_mode != "zh")
+        self.label_zh.setVisible(self._display_mode != "src")
+        self.label_history.setVisible(self._display_mode != "src")
 
     def show_live(self, payload):
         """实时快照：定稿区稳定显示 + 尾部滚动修订。"""
@@ -143,12 +152,14 @@ class SubtitleWindow(QWidget):
         painter.drawRoundedRect(self.rect(), 12, 12)
 
     def apply_config(self, cfg):
-        """实时应用外观配置（字体/透明度/宽度/位置/穿透/淡出时间）。"""
+        """实时应用外观配置（字体/透明度/宽度/位置/穿透/淡出时间/内容模式）。"""
         self.fade_ms = cfg.get("fade_ms", self.fade_ms)
         self._bg_alpha = cfg.get("bg_alpha", self._bg_alpha)
         self._font_size = cfg.get("font_size", 22)
         self._src_color = cfg.get("src_color", self._src_color)
         self._zh_color = cfg.get("zh_color", self._zh_color)
+        self._display_mode = cfg.get("display_mode", self._display_mode)
+        self._apply_display_mode()
         self._apply_fonts()
         width = cfg.get("width", 700)
         self.setMinimumWidth(width)

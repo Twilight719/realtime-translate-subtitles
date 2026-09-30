@@ -195,6 +195,7 @@ class SettingsWindow(QMainWindow):
         "width": 700,
         "fade_ms": 5000,
         "click_through": True,
+        "display_mode": "both",
         "zh_color": "#FFE34D",
         "src_color": "#FFFFFF",
     }
@@ -239,6 +240,7 @@ class SettingsWindow(QMainWindow):
         self.spin_width.valueChanged.connect(self._emit_live_preview)
         self.spin_fade.valueChanged.connect(self._emit_live_preview)
         self.chk_through.toggled.connect(self._emit_live_preview)
+        self.combo_display.currentIndexChanged.connect(self._emit_live_preview)
         self.spin_x.valueChanged.connect(self._emit_live_preview)
         self.spin_y.valueChanged.connect(self._emit_live_preview)
 
@@ -361,6 +363,15 @@ class SettingsWindow(QMainWindow):
         self.chk_through = QCheckBox("点击穿透（鼠标操作穿透字幕窗，不影响游戏）")
         self.chk_through.setChecked(s.get("click_through", True))
         f.addRow(self.chk_through)
+
+        self.combo_display = QComboBox()
+        for code, name in [("both", "双语显示（原文 + 译文）"),
+                           ("zh", "只显示译文"),
+                           ("src", "只显示原文")]:
+            self.combo_display.addItem(name, code)
+        idx = self.combo_display.findData(s.get("display_mode", "both"))
+        self.combo_display.setCurrentIndex(max(0, idx))
+        f.addRow("字幕内容", self.combo_display)
         v.addWidget(box)
 
         color_box = QGroupBox("颜色")
@@ -434,6 +445,7 @@ class SettingsWindow(QMainWindow):
             "字幕条宽度：字幕的最大宽度，文字超出会自动换行。",
             "无语音淡出：多久没有新字幕后自动隐藏字幕条，有声音时立即重新显示。",
             "点击穿透：开启后鼠标可以穿过字幕条操作游戏；用“手动拖动定位”时会临时关闭。",
+            "字幕内容：双语显示 = 原文+译文两行；只显示译文适合专注看翻译；只显示原文适合练听力。",
             "颜色：译文/原文的显示颜色，正在识别中的滚动文字自动使用同色的半透明效果。",
             "位置：预设档位一键摆放到顶部/中央/底部，也可填坐标或手动拖动精确定位。",
         ]))
@@ -481,6 +493,7 @@ class SettingsWindow(QMainWindow):
             "width": self.spin_width.value(),
             "fade_ms": self.spin_fade.value(),
             "click_through": self.chk_through.isChecked(),
+            "display_mode": self.combo_display.currentData(),
             "x": self.spin_x.value(),
             "y": self.spin_y.value(),
             "zh_color": self._zh_color,
@@ -503,6 +516,8 @@ class SettingsWindow(QMainWindow):
         self.spin_width.setValue(d["width"])
         self.spin_fade.setValue(d["fade_ms"])
         self.chk_through.setChecked(d["click_through"])
+        idx = self.combo_display.findData(d["display_mode"])
+        self.combo_display.setCurrentIndex(max(0, idx))
         self._zh_color = d["zh_color"]
         self._src_color = d["src_color"]
         self._refresh_color_btns()
@@ -642,6 +657,9 @@ class SettingsWindow(QMainWindow):
         lf.addRow("Base URL", self.edit_base_url)
         lf.addRow("API Key", self.edit_api_key)
         lf.addRow("模型名", self.edit_model)
+        self.chk_stream = QCheckBox("流式输出（译文逐字上屏，不用等整句翻完，观感更实时）")
+        self.chk_stream.setChecked(cfg_llm.get("stream", True))
+        lf.addRow(self.chk_stream)
         v.addWidget(llm)
 
         v.addWidget(make_help_widget([
@@ -652,6 +670,7 @@ class SettingsWindow(QMainWindow):
             "NLLB 本地模型：离线兜底，断网也能翻，质量一般、速度较慢。",
             "NLLB 运行设备：cpu 不占显存（推荐，把显存留给识别和游戏）；cuda 更快但多占约 1GB 显存。",
             "Base URL / API Key / 模型名：选择“大模型 API”后端时生效，DeepSeek 官方地址为 https://api.deepseek.com/v1。",
+            "流式输出：开启后译文逐字上屏（像打字一样），不用等整句翻完；关闭则等整句翻完一次性显示。仅对“大模型 API”后端生效。",
         ]))
 
         hint = QLabel("API Key 以明文保存在本地 config.yaml 中。翻译后端改动立即重建，无需重启监听。")
@@ -827,6 +846,7 @@ class SettingsWindow(QMainWindow):
         s["width"] = self.spin_width.value()
         s["fade_ms"] = self.spin_fade.value()
         s["click_through"] = self.chk_through.isChecked()
+        s["display_mode"] = self.combo_display.currentData()
         s["x"] = self.spin_x.value()
         s["y"] = self.spin_y.value()
         s["zh_color"] = self._zh_color
@@ -856,9 +876,11 @@ class SettingsWindow(QMainWindow):
             if self.order_list.item(i).checkState() == Qt.Checked
         ]
         t["nllb_device"] = self.combo_nllb.currentText()
+        t.setdefault("llm_api", {})
         t["llm_api"]["base_url"] = self.edit_base_url.text().strip()
         t["llm_api"]["api_key"] = self.edit_api_key.text().strip()
         t["llm_api"]["model"] = self.edit_model.text().strip()
+        t["llm_api"]["stream"] = self.chk_stream.isChecked()
 
         self._live_dirty = False
         self.request_apply.emit(cfg)
