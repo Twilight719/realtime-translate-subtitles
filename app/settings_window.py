@@ -1,8 +1,12 @@
 """设置主窗口：深色主题，侧边栏导航（主页 / 字幕外观 / 识别模型 / 翻译服务 / 日志）。"""
 
 import os
+import shutil
 import subprocess
 import sys
+import tempfile
+import threading
+import zipfile
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont
@@ -20,6 +24,7 @@ from PyQt5.QtWidgets import (    QApplication,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressDialog,
     QPushButton,
     QSlider,
     QSpinBox,
@@ -32,9 +37,11 @@ from .version import __version__
 
 try:
     from .paths import base_dir
+    from .hotkeys import parse_hotkey
 except ImportError:  # 直接运行本文件做界面预览时
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from app.paths import base_dir
+    from app.hotkeys import parse_hotkey
 
 QSS = """
 QMainWindow, QWidget { background: #1e1e26; color: #e6e6ea; font-family: "Microsoft YaHei"; font-size: __FS__px; }
@@ -146,6 +153,75 @@ class SliderSpin(QWidget):
         self.slider.setValue(v)  # 会经 _from_slider 同步到 spin 并发出 valueChanged
 
 
+DEFAULT_HOTKEY = "alt+t"
+
+
+class HotkeyCaptureButton(QPushButton):
+    """点击进入捕获状态，下一次按下的组合键成为新热键；Esc 取消。"""
+
+    def __init__(self, hotkey=DEFAULT_HOTKEY, parent=None):
+        super().__init__(hotkey, parent)
+        self._capturing = False
+        self._original = hotkey
+        self.clicked.connect(self._begin_capture)
+
+    def hotkey(self):
+        return self.text().strip().lower()
+
+    def _begin_capture(self):
+        self._capturing = True
+        self._original = self.text()
+        self.setText("请按下新热键…（Esc 取消）")
+        self.grabKeyboard()
+
+    def _end_capture(self, text=None):
+        self.releaseKeyboard()
+        self._capturing = False
+        self.setText(text if text else self._original)
+
+    def keyPressEvent(self, e):
+        if not self._capturing:
+            super().keyPressEvent(e)
+            return
+        key = e.key()
+        if key == Qt.Key_Escape:
+            self._end_capture()
+            return
+        if key in (Qt.Key_Control, Qt.Key_Shift, Qt.Key_Alt, Qt.Key_Meta):
+            return  # 只按了修饰键，继续等完整组合
+        name = self._key_name(key)
+        if name is None:
+            self._end_capture()
+            QMessageBox.warning(self, "不支持的热键", "只支持 字母 / 数字 / F1~F12 与 Ctrl/Alt/Shift/Win 的组合。")
+            return
+        mods = e.modifiers()
+        parts = []
+        if mods & Qt.ControlModifier:
+            parts.append("ctrl")
+        if mods & Qt.AltModifier:
+            parts.append("alt")
+        if mods & Qt.ShiftModifier:
+            parts.append("shift")
+        if mods & Qt.MetaModifier:
+            parts.append("win")
+        if not parts:
+            # 不带修饰键的裸键会劫持正常打字，必须组合使用
+            self.setText("需同时按住 Ctrl/Alt/Shift 之一，请重按…")
+            return
+        parts.append(name)
+        self._end_capture("+".join(parts))
+
+    @staticmethod
+    def _key_name(key):
+        if Qt.Key_A <= key <= Qt.Key_Z:
+            return chr(ord("a") + key - Qt.Key_A)
+        if Qt.Key_0 <= key <= Qt.Key_9:
+            return chr(ord("0") + key - Qt.Key_0)
+        if Qt.Key_F1 <= key <= Qt.Key_F12:
+            return f"f{key - Qt.Key_F1 + 1}"
+        return None
+
+
 def make_help_widget(lines):
     """可折叠的“各项说明”：一个切换按钮 + 默认隐藏的说明文本（不占地方）。"""
     container = QWidget()
@@ -187,6 +263,9 @@ class SettingsWindow(QMainWindow):
     request_drag_end = pyqtSignal()
     request_live_preview = pyqtSignal(dict)  # 外观控件改动时实时预览
     request_check_update = pyqtSignal()  # “检查更新”按钮
+    request_install_update = pyqtSignal(str)  # 更新包已下载解压，主程序执行替换重启
+    download_progress = pyqtSignal(int, int, int, int)  # 已下载字节, 总字节, 通道序号, 通道总数
+    download_finished = pyqtSignal(bool, str, str)  # 成功?, 错误描述或使用的地址, zip 路径
 
     # 字幕外观默认值（“恢复默认设置”用）
     SUBTITLE_DEFAULTS = {
@@ -293,6 +372,23 @@ class SettingsWindow(QMainWindow):
         f.addRow("识别模型", self.info_model)
         f.addRow("翻译后端", self.info_backend)
         v.addWidget(info)
+
+        hk_box = QGroupBox("全局热键")
+        hf = QFormLayout(hk_box)
+        hk_row = QHBoxLayout()
+        self.btn_hotkey = HotkeyCaptureButton(self.cfg.get("hotkey", DEFAULT_HOTKEY))
+        self.btn_hotkey.setMinimumWidth(140)
+        btn_hk_default = QPushButton("恢复默认 (Alt+T)")
+        btn_hk_default.clicked.connect(lambda: self.btn_hotkey.setText(DEFAULT_HOTKEY))
+        hk_row.addWidget(self.btn_hotkey)
+        hk_row.addWidget(btn_hk_default)
+        hk_row.addStretch()
+        hf.addRow("启停监听", hk_row)
+        hk_hint = QLabel("点击左侧按钮后按下新的组合键（Ctrl/Alt/Shift + 字母/数字/F1~F12），“保存并应用”后立即生效。")
+        hk_hint.setObjectName("hint")
+        hk_hint.setWordWrap(True)
+        hf.addRow(hk_hint)
+        v.addWidget(hk_box)
 
         stat = QGroupBox("统计")
         fh = QFormLayout(stat)
@@ -754,8 +850,8 @@ class SettingsWindow(QMainWindow):
         self.update_result.setText("正在检查…")
         self.request_check_update.emit()
 
-    def show_update_result(self, result):
-        """主程序检查完成后回调（已在 Qt 主线程）。"""
+    def show_update_result(self, result, popup=True):
+        """主程序检查完成后回调（已在 Qt 主线程）。popup=False 时只更新文字（启动自动检查用）。"""
         import webbrowser
 
         self.btn_update.setEnabled(True)
@@ -763,14 +859,111 @@ class SettingsWindow(QMainWindow):
             self.update_result.setText(f"检查失败：{result['error']}")
             return
         if result.get("has_update"):
-            self.update_result.setText(f"发现新版本 {result['latest']}（当前 v{__version__}）")
-            if QMessageBox.question(
-                self, "发现新版本",
-                f"最新版本 {result['latest']} 已发布（当前 v{__version__}）。\n是否打开下载页面？",
-            ) == QMessageBox.Yes:
+            self._latest_update = result
+            self.update_result.setText(f"发现新版本 {result['latest']}（当前 v{__version__}），点“检查更新”可下载")
+            if not popup:
+                return
+            box = QMessageBox(self)
+            box.setWindowTitle("发现新版本")
+            box.setText(
+                f"最新版本 {result['latest']} 已发布（当前 v{__version__}）。\n\n"
+                "“软件内下载”会优先走国内加速镜像，全部失败才用 GitHub 直连；\n"
+                "下载完成后自动替换旧文件并重启（你的配置和已下载模型都会保留）。"
+            )
+            btn_dl = box.addButton("软件内下载更新（推荐）", QMessageBox.AcceptRole)
+            btn_web = box.addButton("打开下载页面", QMessageBox.ActionRole)
+            box.addButton("取消", QMessageBox.RejectRole)
+            box.exec_()
+            clicked = box.clickedButton()
+            if clicked is btn_dl:
+                self._start_download(result)
+            elif clicked is btn_web:
                 webbrowser.open(result["url"])
         else:
+            self._latest_update = None
             self.update_result.setText(f"已是最新版本（v{__version__}）")
+
+    # ---------- 软件内下载更新 ----------
+    def _start_download(self, result):
+        asset = result.get("asset")
+        if not asset:
+            # Release 里没有标准更新包附件（异常情况），退化为浏览器下载
+            import webbrowser
+
+            webbrowser.open(result["url"])
+            return
+        try:
+            from .updater import download_asset
+        except ImportError:
+            from app.updater import download_asset
+
+        dest = os.path.join(tempfile.gettempdir(), asset["name"])
+        self._dl_cancel = threading.Event()
+        self._dl_dialog = QProgressDialog("准备下载…", "取消", 0, 100, self)
+        self._dl_dialog.setWindowTitle(f"下载更新 {result['latest']}")
+        self._dl_dialog.setWindowModality(Qt.WindowModal)
+        self._dl_dialog.setMinimumDuration(0)
+        self._dl_dialog.setMinimumWidth(420)
+        self._dl_dialog.canceled.connect(self._dl_cancel.set)
+        self.download_progress.connect(self._on_dl_progress)
+        self.download_finished.connect(self._on_dl_finished)
+
+        def run():
+            used_url, err = download_asset(
+                asset, dest,
+                progress_cb=lambda *a: self.download_progress.emit(*a),
+                cancel=self._dl_cancel,
+            )
+            self.download_finished.emit(err is None, err or used_url, dest)
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_dl_progress(self, done, total, idx, count):
+        channel = "GitHub 直连" if idx == count - 1 else f"镜像 {idx + 1}"
+        if total:
+            self._dl_dialog.setLabelText(
+                f"正在下载（{channel}，第 {idx + 1}/{count} 个通道）：\n"
+                f"{done / 1048576:.0f} / {total / 1048576:.0f} MB"
+            )
+            self._dl_dialog.setValue(int(done * 100 / total))
+        else:
+            self._dl_dialog.setLabelText(f"正在下载（{channel}）：{done / 1048576:.0f} MB")
+
+    def _on_dl_finished(self, ok, info, dest):
+        self._dl_dialog.close()
+        if not ok:
+            if info != "已取消":
+                QMessageBox.warning(
+                    self, "下载失败",
+                    f"{info}\n\n可以点“检查更新 → 打开下载页面”用浏览器手动下载。",
+                )
+            return
+        try:
+            app_dir = self._extract_update(dest)
+        except Exception as e:
+            QMessageBox.warning(self, "解压失败", f"{e}\n\n可以用浏览器手动下载后覆盖安装。")
+            return
+        if QMessageBox.question(
+            self, "下载完成",
+            "更新包已就绪，立即重启完成更新吗？\n（当前配置和已下载的模型都会保留）",
+        ) == QMessageBox.Yes:
+            self.request_install_update.emit(app_dir)
+
+    @staticmethod
+    def _extract_update(zip_path):
+        """解压更新包，返回新版程序目录（内含 exe 的那层）。"""
+        staging_root = zip_path[:-4] + "_extract"
+        shutil.rmtree(staging_root, ignore_errors=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(staging_root)
+        entries = os.listdir(staging_root)
+        # 压缩包结构为 实时翻译字幕/…（单顶层目录）；容错处理平铺情况
+        app_dir = (os.path.join(staging_root, entries[0])
+                   if len(entries) == 1 and os.path.isdir(os.path.join(staging_root, entries[0]))
+                   else staging_root)
+        if not any(f.lower().endswith(".exe") for f in os.listdir(app_dir)):
+            raise RuntimeError("更新包结构异常：找不到程序文件")
+        return app_dir
 
     def refresh_info(self, device_name=""):
         self.info_hotkey.setText(self.cfg.get("hotkey", "alt+t"))
@@ -842,6 +1035,17 @@ class SettingsWindow(QMainWindow):
 
     def _on_apply(self):
         cfg = self.cfg
+        hk = self.btn_hotkey.hotkey()
+        try:
+            parse_hotkey(hk)
+            cfg["hotkey"] = hk
+        except ValueError as e:
+            QMessageBox.warning(
+                self, "热键无效",
+                f"热键“{hk}”无法识别（{e}），本次保留原热键 {cfg.get('hotkey', DEFAULT_HOTKEY)}。",
+            )
+            self.btn_hotkey.setText(cfg.get("hotkey", DEFAULT_HOTKEY))
+
         s = cfg["subtitle"]
         s["font_size"] = self.spin_font.value()
         s["bg_alpha"] = self.slider_alpha.value()

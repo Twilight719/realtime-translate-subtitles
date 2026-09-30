@@ -6,6 +6,24 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.10] - 2026-09-30
+
+### 新增 / Added
+
+- **自定义全局热键**：设置 → 主页 → 全局热键，点击按钮后按下新组合键（Ctrl/Alt/Shift/Win + 字母/数字/F1~F12），保存后立即生效；旁边有"恢复默认 (Alt+T)"按钮。新热键被其他程序占用时会提示并保留原热键。托盘菜单的快捷键提示文字同步更新。
+  Customizable global hotkey: press any Ctrl/Alt/Shift/Win + key combo in Settings → Home. Takes effect immediately on save, with a "restore default (Alt+T)" button; conflicts are detected and the old hotkey is kept.
+- **新版本主动提醒**：软件启动后自动静默检查一次更新，发现新版本时托盘弹通知，点击通知直接打开设置页。
+  Startup update check: a tray notification appears when a new version is available; clicking it opens the settings page.
+- **软件内下载更新（镜像优先，GitHub 保底）**：发现新版本后可直接在软件内下载——优先依次尝试国内 GitHub 加速镜像（ghfast.top / gh-proxy.com / ghproxy.net），全部失败才用 GitHub 直连；带进度条、可取消；下载完成自动校验（zip 完整性 + GitHub 官方 sha256），确认后自动替换旧文件并重启，你的配置和已下载的模型都会保留。
+  In-app update download: tries China-friendly GitHub mirrors first, falls back to GitHub direct; progress bar with cancel; verifies zip integrity and official sha256; then replaces files and restarts automatically, preserving your config and downloaded models.
+
+### 修复 / Fixed
+
+- **设置页改动识别/翻译参数可能不生效**：设置页与主程序共享同一个配置对象，导致"改动检测"永远认为没变化，修改识别模型等参数后不会自动重建。现在用独立快照对比，参数改动可靠生效。
+  Changing recognition/translation settings could silently do nothing because the change-detection compared the shared config object against itself. A snapshot-based comparison now reliably detects changes.
+
+---
+
 ## [v1.0.9] - 2026-09-30
 
 ### 新增 / Added
@@ -159,6 +177,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.10]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.10
 [v1.0.9]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.9
 [v1.0.8]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.8
 [v1.0.7]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.7

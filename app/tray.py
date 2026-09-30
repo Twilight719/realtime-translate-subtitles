@@ -63,6 +63,18 @@ class TrayIcon(QSystemTrayIcon):
         self.activated.connect(self._on_activated)
         self._on_toggle = on_toggle
         self._on_settings = on_settings
+        self._running = False
+        self._hotkey_label = "Alt+T"
+
+    def set_hotkey(self, hotkey):
+        """自定义热键后同步菜单里的提示文字。"""
+        self._hotkey_label = "+".join(p.capitalize() for p in hotkey.split("+"))
+        self._refresh_toggle_text()
+
+    def _refresh_toggle_text(self):
+        self.action_toggle.setText(
+            f"{'停止' if self._running else '开始'} ({self._hotkey_label})"
+        )
 
     def _on_activated(self, reason):
         # 双击打开设置主界面（符合大多数用户的直觉）
@@ -70,11 +82,11 @@ class TrayIcon(QSystemTrayIcon):
             self._on_settings()
 
     def set_running(self, running):
+        self._running = running
         if running:
             self.setIcon(_make_icon("#4CAF50"))
             self.setToolTip("实时翻译字幕（运行中）")
-            self.action_toggle.setText("停止 (Alt+T)")
         else:
             self.setIcon(_make_icon("#888888"))
             self.setToolTip("实时翻译字幕（已停止）")
-            self.action_toggle.setText("开始 (Alt+T)")
+        self._refresh_toggle_text()

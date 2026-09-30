@@ -12,7 +12,8 @@ A Windows desktop tool for real-time translated subtitles: it listens to your PC
 - **Multiple translation backends**: Youdao / LLM APIs (DeepSeek etc.) / MyMemory / Google / offline NLLB fallback, tried in priority order with automatic failover
 - **Headphone hot-swap**: follows the default output device automatically when you plug/unplug headphones
 - **GUI settings**: subtitle style (font/color/opacity/width/position), languages, models, translation backends, log viewer — each option has a built-in explanation
-- **Global hotkey** (Alt+T by default), system tray, built-in update checker
+- **Global hotkey** (Alt+T by default, customizable to any Ctrl/Alt/Shift combo in Settings), system tray
+- **Auto-update**: silent update check on startup with a tray notification; in-app download (China-friendly GitHub mirrors first, GitHub direct as fallback), then automatic file replacement and restart — your config and downloaded models are preserved
 
 ## Quick start (users)
 
@@ -50,7 +51,9 @@ Output goes to `dist\实时翻译字幕\`. Note: **the project path must not con
 
 ## Check for updates
 
-Settings → Home → About → "检查更新" compares against the latest GitHub Release and offers to open the download page.
+- **Automatic**: the app silently checks for updates on startup and shows a tray notification when a new version is available; click the notification to open Settings
+- **Manual**: Settings → Home → About → "检查更新"
+- **In-app download**: downloads via China-friendly GitHub mirrors first (ghfast.top / gh-proxy.com / ghproxy.net), falling back to GitHub direct; verifies the zip and its official sha256, then replaces files and restarts automatically, keeping your config and models
 
 See [CHANGELOG.md](CHANGELOG.md) for per-version release notes (Chinese + English).
 

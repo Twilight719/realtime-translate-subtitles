@@ -14,6 +14,7 @@ import faulthandler
 
 faulthandler.enable()  # 原生崩溃时打印 Python 调用栈（打包版排查用）
 
+import copy
 import queue
 import threading
 import time
@@ -61,7 +62,7 @@ for _root in dict.fromkeys(_cuda_roots):
             except OSError:
                 pass
 
-from PyQt5.QtCore import QObject, QCoreApplication, pyqtSignal
+from PyQt5.QtCore import QObject, QCoreApplication, QTimer, pyqtSignal
 from PyQt5.QtGui import QIcon
 from PyQt5.QtNetwork import QLocalServer, QLocalSocket
 from PyQt5.QtWidgets import QApplication, QMessageBox, QSystemTrayIcon
@@ -151,7 +152,7 @@ subtitle:
 ui:
   font_size: 13            # 设置界面字体大小（10~22），改大后窗口可手动拉大
 
-hotkey: alt+t              # 全局启停快捷键
+hotkey: alt+t              # 全局启停快捷键（设置页可自定义，格式如 ctrl+shift+t）
 """
 
 
@@ -466,6 +467,9 @@ class ToggleBridge(QObject):
 class MainApp:
     def __init__(self):
         self.cfg = load_config()
+        # 上一次已生效配置的快照（设置页与主程序共享同一个 cfg 对象，
+        # 直接对比 old/new 会永远相等，必须用独立快照判断哪些变了）
+        self._prev_cfg = copy.deepcopy(self.cfg)
         # Windows 任务栏按 AppUserModelID 分组，显式设置后任务栏才会显示应用图标
         # 而不是 python.exe 的默认图标
         try:
@@ -500,6 +504,7 @@ class MainApp:
         self.pipeline = Pipeline(self.cfg, self._emit_subtitle)
 
         self.tray = TrayIcon(on_toggle=self.toggle, on_quit=self.quit, on_settings=self.open_settings)
+        self.tray.set_hotkey(self.cfg.get("hotkey", "alt+t"))
         self.tray.show()
 
         self.hotkeys = None
@@ -521,6 +526,11 @@ class MainApp:
         )
 
         self._start_instance_server()
+
+        # 启动后静默检查一次更新：有新版本时弹托盘通知，点击通知打开设置页下载
+        self._latest_update = None
+        self.tray.messageClicked.connect(lambda *_: self.open_settings())
+        QTimer.singleShot(5000, lambda: self._check_update(auto=True))
 
     _INSTANCE_KEY = "realtime-translate-subtitles-single-instance"
 
@@ -579,20 +589,83 @@ class MainApp:
         self.settings_window.set_position(x, y)
         log.info("字幕位置已定位: (%d, %d)，点“保存并应用”生效", x, y)
 
-    def _check_update(self):
-        """后台线程查询 GitHub Releases，结果经 bridge 回主线程显示。"""
+    def _check_update(self, auto=False):
+        """后台线程查询 GitHub Releases，结果经 bridge 回主线程显示。auto=True 为启动时的静默检查。"""
         from app.updater import check_update
 
         def run():
             result = check_update()
+            result["auto"] = auto
             log.info("检查更新: %s", result)
             self.bridge.update_result.emit(result)
 
         threading.Thread(target=run, daemon=True).start()
 
     def _show_update_result(self, result):
-        if self.settings_window is not None:
-            self.settings_window.show_update_result(result)
+        auto = result.pop("auto", False)
+        if result.get("has_update"):
+            self._latest_update = result
+            if auto:
+                self.tray.showMessage(
+                    "实时翻译字幕",
+                    f"发现新版本 {result['latest']}，点击此通知打开设置页下载更新",
+                    QSystemTrayIcon.Information, 8000,
+                )
+            if self.settings_window is not None:
+                self.settings_window.show_update_result(result, popup=not auto)
+        elif not auto and self.settings_window is not None:
+            self.settings_window.show_update_result(result, popup=True)
+
+    def _install_update(self, new_app_dir):
+        """软件内更新：生成 PowerShell 脚本——等本进程退出后用新版覆盖程序目录
+        （保留 config.yaml、models、日志），然后重新启动。镜像下载见 updater.py。"""
+        if not getattr(sys, "frozen", False):
+            QMessageBox.information(
+                None, "开发模式",
+                f"开发环境不执行自动替换。新版本文件位于：\n{new_app_dir}",
+            )
+            return
+        import subprocess
+        import tempfile
+
+        pid = os.getpid()
+        target = os.path.dirname(sys.executable)
+        exe = sys.executable
+        staging_root = os.path.dirname(new_app_dir)
+        script = f"""
+$ErrorActionPreference = "SilentlyContinue"
+while (Get-Process -Id {pid}) {{ Start-Sleep -Milliseconds 500 }}
+Start-Sleep -Seconds 1
+robocopy "{new_app_dir}" "{target}" /E /IS /XF config.yaml app.log app.log.1 app.log.2 /XD models /NFL /NDL /NJH /NJS | Out-Null
+Start-Process "{exe}"
+Remove-Item -Recurse -Force "{staging_root}"
+Remove-Item -Force $MyInvocation.MyCommand.Path
+"""
+        script_path = os.path.join(tempfile.gettempdir(), "rts_update.ps1")
+        # UTF-8 BOM：路径含中文时 PowerShell 5.1 才能正确解析脚本
+        with open(script_path, "w", encoding="utf-8-sig") as f:
+            f.write(script)
+        log.info("开始安装更新: %s → %s", new_app_dir, target)
+        subprocess.Popen(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass",
+             "-WindowStyle", "Hidden", "-File", script_path],
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        self.quit()
+
+    def _rebind_hotkey(self, hotkey):
+        """运行时切换全局热键：先注册新的，成功后再注销旧的，失败则保持旧热键。"""
+        try:
+            mgr = HotkeyManager(app=self.app, hotkey=hotkey, on_toggle=self.toggle)
+            mgr.start()
+        except Exception as e:
+            log.warning("新热键 %s 注册失败: %s", hotkey, e)
+            return False
+        if self.hotkeys is not None:
+            self.hotkeys.stop()
+        self.hotkeys = mgr
+        log.info("全局热键已切换: %s", hotkey)
+        return True
 
     def _live_preview(self, subtitle_cfg):
         """设置页外观改动：立即应用到字幕窗并显示预览（不写配置文件）。"""
@@ -618,6 +691,7 @@ class MainApp:
             self.settings_window.request_drag_end.connect(self._finish_drag)
             self.settings_window.request_live_preview.connect(self._live_preview)
             self.settings_window.request_check_update.connect(self._check_update)
+            self.settings_window.request_install_update.connect(self._install_update)
             self.settings_window.set_running(self.pipeline.running)
             self.settings_window.set_subtitle_count(self.subtitle_count)
         try:
@@ -625,21 +699,40 @@ class MainApp:
         except Exception:
             device_name = ""
         self.settings_window.refresh_info(device_name)
+        if self._latest_update is not None:
+            # 启动时已发现新版本：设置页关于区直接显示提示（不弹窗打扰）
+            self.settings_window.show_update_result(self._latest_update, popup=False)
         self.settings_window.show()
         self.settings_window.raise_()
         self.settings_window.activateWindow()
 
     def apply_config(self, cfg):
-        old_whisper = dict(self.cfg.get("whisper", {}))
-        old_translator = dict(self.cfg.get("translator", {}))
+        prev = self._prev_cfg
+        old_hotkey = prev.get("hotkey", "alt+t")
+        new_hotkey = cfg.get("hotkey", "alt+t")
+        if new_hotkey != old_hotkey:
+            if self._rebind_hotkey(new_hotkey):
+                self.tray.set_hotkey(new_hotkey)
+            else:
+                # 新热键注册失败：配置回退为仍在生效的旧热键
+                cfg["hotkey"] = old_hotkey
+                if self.settings_window is not None:
+                    self.settings_window.btn_hotkey.setText(old_hotkey)
+                QMessageBox.warning(
+                    None, "热键注册失败",
+                    f"热键 {new_hotkey} 注册失败（可能被其他程序占用），已保留原热键 {old_hotkey}。",
+                )
+        reload_transcriber = cfg.get("whisper", {}) != prev.get("whisper", {})
+        reload_translator = cfg.get("translator", {}) != prev.get("translator", {})
         save_config(cfg)
         self.cfg = cfg
         self.window.apply_config(cfg.get("subtitle", {}))
         self.pipeline.update_cfg(
             cfg,
-            reload_transcriber=dict(cfg.get("whisper", {})) != old_whisper,
-            reload_translator=dict(cfg.get("translator", {})) != old_translator,
+            reload_transcriber=reload_transcriber,
+            reload_translator=reload_translator,
         )
+        self._prev_cfg = copy.deepcopy(cfg)
         if self.settings_window is not None:
             self.settings_window.refresh_info()
         log.info("配置已保存并应用")
