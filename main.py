@@ -1,12 +1,20 @@
 """入口：装配音频捕获 → VAD → whisper → 翻译 → 字幕窗，含快捷键与托盘。"""
 
+import os
+import sys
+
+# 窗口模式打包（--windowed）下没有控制台，sys.stdout/stderr 为 None，
+# faulthandler 和 logging 会因此崩溃，先补成空设备
+if sys.stdout is None:
+    sys.stdout = open(os.devnull, "w", encoding="utf-8")
+if sys.stderr is None:
+    sys.stderr = open(os.devnull, "w", encoding="utf-8")
+
 import faulthandler
 
 faulthandler.enable()  # 原生崩溃时打印 Python 调用栈（打包版排查用）
 
-import os
 import queue
-import sys
 import threading
 import time
 
