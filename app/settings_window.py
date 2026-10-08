@@ -156,7 +156,7 @@ class SliderSpin(QWidget):
 
 
 DEFAULT_HOTKEY = "alt+t"
-DEFAULT_HOTKEY_OCR = "alt+r"
+DEFAULT_HOTKEY_OCR = "ctrl+alt+r"
 
 
 class HotkeyCaptureButton(QPushButton):
@@ -395,7 +395,7 @@ class SettingsWindow(QMainWindow):
             self.cfg.get("hotkey_ocr", DEFAULT_HOTKEY_OCR)
         )
         self.btn_hotkey_ocr.setMinimumWidth(140)
-        btn_ocr_default = QPushButton("恢复默认 (Alt+R)")
+        btn_ocr_default = QPushButton("恢复默认 (Ctrl+Alt+R)")
         btn_ocr_default.clicked.connect(
             lambda: self.btn_hotkey_ocr.setText(DEFAULT_HOTKEY_OCR)
         )

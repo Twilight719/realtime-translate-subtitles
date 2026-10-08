@@ -6,6 +6,15 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.2.2] - 2026-10-08
+
+### 变更 / Changed
+
+- **截图翻译默认热键由 Alt+R 改为 Ctrl+Alt+R**：Alt+R 与 AMD Radeon 显卡面板等常见软件的全局热键冲突，导致部分电脑上注册失败。已自定义过热键的用户不受影响，新安装或未设置过的用户使用新默认值。
+  Default screenshot-translation hotkey changed from Alt+R to Ctrl+Alt+R: Alt+R conflicts with common software such as the AMD Radeon overlay, causing registration to fail on some machines. Users who already customized the hotkey are unaffected.
+
+---
+
 ## [v1.2.1] - 2026-10-08
 
 ### 修复 / Fixed
@@ -244,6 +253,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.2.2]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.2
 [v1.2.1]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.1
 [v1.2.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.0
 [v1.1.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.1.0

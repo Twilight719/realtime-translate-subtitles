@@ -160,7 +160,7 @@ app:
   autostart: false         # 开机自动启动（托盘常驻）
 
 hotkey: alt+t              # 全局启停快捷键（设置页可自定义，格式如 ctrl+shift+t）
-hotkey_ocr: alt+r          # 截图翻译快捷键：框选屏幕区域 → OCR 识别 → 翻译（看漫画/图片文字用）
+hotkey_ocr: ctrl+alt+r     # 截图翻译快捷键：框选屏幕区域 → OCR 识别 → 翻译（看漫画/图片文字用）
 """
 
 
@@ -554,7 +554,7 @@ class MainApp:
         self.tray = TrayIcon(on_toggle=self.toggle, on_quit=self.quit,
                              on_settings=self.open_settings, on_ocr=self.start_ocr_snip)
         self.tray.set_hotkey(self.cfg.get("hotkey", "alt+t"))
-        self.tray.set_ocr_hotkey(self.cfg.get("hotkey_ocr", "alt+r"))
+        self.tray.set_ocr_hotkey(self.cfg.get("hotkey_ocr", "ctrl+alt+r"))
         self.tray.show()
 
         self.hotkeys = None
@@ -570,7 +570,7 @@ class MainApp:
         self.ocr_hotkeys = None
         try:
             self.ocr_hotkeys = HotkeyManager(
-                app=self.app, hotkey=self.cfg.get("hotkey_ocr", "alt+r"),
+                app=self.app, hotkey=self.cfg.get("hotkey_ocr", "ctrl+alt+r"),
                 on_toggle=self.start_ocr_snip, hotkey_id=0xB002,
             )
             self.ocr_hotkeys.start()
@@ -860,7 +860,7 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
         prev = self._prev_cfg
         for key, attr, default, handler, btn_name, hotkey_id in (
             ("hotkey", "hotkeys", "alt+t", self.toggle, "btn_hotkey", None),
-            ("hotkey_ocr", "ocr_hotkeys", "alt+r", self.start_ocr_snip, "btn_hotkey_ocr", 0xB002),
+            ("hotkey_ocr", "ocr_hotkeys", "ctrl+alt+r", self.start_ocr_snip, "btn_hotkey_ocr", 0xB002),
         ):
             old_hotkey = prev.get(key, default)
             new_hotkey = cfg.get(key, default)

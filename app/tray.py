@@ -48,7 +48,7 @@ class TrayIcon(QSystemTrayIcon):
         # QAction 必须挂在 self 上，否则 Python 引用被回收后菜单项会消失
         self.action_toggle = QAction("开始 (Alt+T)", self)
         self.action_toggle.triggered.connect(on_toggle)
-        self.action_ocr = QAction("截图翻译 (Alt+R)", self)
+        self.action_ocr = QAction("截图翻译 (Ctrl+Alt+R)", self)
         if on_ocr:
             self.action_ocr.triggered.connect(on_ocr)
         self.action_settings = QAction("设置", self)

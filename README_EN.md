@@ -13,7 +13,7 @@ A Windows desktop tool for real-time translated subtitles: it listens to your PC
 - **Headphone hot-swap**: follows the default output device automatically when you plug/unplug headphones
 - **GUI settings**: subtitle style (font/color/opacity/width/position), languages, models, translation backends, log viewer — each option has a built-in explanation
 - **Global hotkey** (Alt+T by default, customizable to any Ctrl/Alt/Shift combo in Settings), system tray
-- **Screenshot translation**: press Alt+R and drag-select any screen region → built-in Windows OCR → translation popup — made for manga and image text (Japanese requires the Windows Japanese language pack)
+- **Screenshot translation**: press Ctrl+Alt+R and drag-select any screen region → built-in Windows OCR → translation popup — made for manga and image text (Japanese requires the Windows Japanese language pack)
 - **Auto-update**: silent update check on startup with a tray notification; in-app download (China-friendly GitHub mirrors first, GitHub direct as fallback), then automatic file replacement and restart — your config and downloaded models are preserved
 
 ## Quick start (users)
