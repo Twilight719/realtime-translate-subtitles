@@ -41,13 +41,16 @@ def _make_icon(color):
 
 
 class TrayIcon(QSystemTrayIcon):
-    def __init__(self, on_toggle, on_quit, on_settings=None, parent=None):
+    def __init__(self, on_toggle, on_quit, on_settings=None, on_ocr=None, parent=None):
         super().__init__(_make_icon("#888888"), parent)
         self.setToolTip("实时翻译字幕（已停止）")
 
         # QAction 必须挂在 self 上，否则 Python 引用被回收后菜单项会消失
         self.action_toggle = QAction("开始 (Alt+T)", self)
         self.action_toggle.triggered.connect(on_toggle)
+        self.action_ocr = QAction("截图翻译 (Alt+R)", self)
+        if on_ocr:
+            self.action_ocr.triggered.connect(on_ocr)
         self.action_settings = QAction("设置", self)
         if on_settings:
             self.action_settings.triggered.connect(on_settings)
@@ -56,6 +59,7 @@ class TrayIcon(QSystemTrayIcon):
 
         menu = QMenu()
         menu.addAction(self.action_toggle)
+        menu.addAction(self.action_ocr)
         menu.addAction(self.action_settings)
         menu.addSeparator()
         menu.addAction(self.action_quit)
@@ -70,6 +74,11 @@ class TrayIcon(QSystemTrayIcon):
         """自定义热键后同步菜单里的提示文字。"""
         self._hotkey_label = "+".join(p.capitalize() for p in hotkey.split("+"))
         self._refresh_toggle_text()
+
+    def set_ocr_hotkey(self, hotkey):
+        self.action_ocr.setText(
+            "截图翻译 (" + "+".join(p.capitalize() for p in hotkey.split("+")) + ")"
+        )
 
     def _refresh_toggle_text(self):
         self.action_toggle.setText(

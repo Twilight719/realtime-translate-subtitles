@@ -14,3 +14,4 @@ ruamel.yaml>=0.18
 deep-translator>=1.11
 requests>=2.31
 truststore>=0.10
+winsdk>=1.0.0b10

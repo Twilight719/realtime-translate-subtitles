@@ -156,6 +156,7 @@ class SliderSpin(QWidget):
 
 
 DEFAULT_HOTKEY = "alt+t"
+DEFAULT_HOTKEY_OCR = "alt+r"
 
 
 class HotkeyCaptureButton(QPushButton):
@@ -389,6 +390,19 @@ class SettingsWindow(QMainWindow):
         hk_row.addWidget(btn_hk_default)
         hk_row.addStretch()
         hf.addRow("启停监听", hk_row)
+        ocr_row = QHBoxLayout()
+        self.btn_hotkey_ocr = HotkeyCaptureButton(
+            self.cfg.get("hotkey_ocr", DEFAULT_HOTKEY_OCR)
+        )
+        self.btn_hotkey_ocr.setMinimumWidth(140)
+        btn_ocr_default = QPushButton("恢复默认 (Alt+R)")
+        btn_ocr_default.clicked.connect(
+            lambda: self.btn_hotkey_ocr.setText(DEFAULT_HOTKEY_OCR)
+        )
+        ocr_row.addWidget(self.btn_hotkey_ocr)
+        ocr_row.addWidget(btn_ocr_default)
+        ocr_row.addStretch()
+        hf.addRow("截图翻译", ocr_row)
         hk_hint = QLabel("点击左侧按钮后按下新的组合键（Ctrl/Alt/Shift + 字母/数字/F1~F12），“保存并应用”后立即生效。")
         hk_hint.setObjectName("hint")
         hk_hint.setWordWrap(True)
@@ -1202,6 +1216,16 @@ class SettingsWindow(QMainWindow):
                 f"热键“{hk}”无法识别（{e}），本次保留原热键 {cfg.get('hotkey', DEFAULT_HOTKEY)}。",
             )
             self.btn_hotkey.setText(cfg.get("hotkey", DEFAULT_HOTKEY))
+        hk_ocr = self.btn_hotkey_ocr.hotkey()
+        try:
+            parse_hotkey(hk_ocr)
+            cfg["hotkey_ocr"] = hk_ocr
+        except ValueError as e:
+            QMessageBox.warning(
+                self, "热键无效",
+                f"热键“{hk_ocr}”无法识别（{e}），本次保留原热键 {cfg.get('hotkey_ocr', DEFAULT_HOTKEY_OCR)}。",
+            )
+            self.btn_hotkey_ocr.setText(cfg.get("hotkey_ocr", DEFAULT_HOTKEY_OCR))
 
         s = cfg["subtitle"]
         s["font_size"] = self.spin_font.value()

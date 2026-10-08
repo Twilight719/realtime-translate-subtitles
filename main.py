@@ -160,6 +160,7 @@ app:
   autostart: false         # 开机自动启动（托盘常驻）
 
 hotkey: alt+t              # 全局启停快捷键（设置页可自定义，格式如 ctrl+shift+t）
+hotkey_ocr: alt+r          # 截图翻译快捷键：框选屏幕区域 → OCR 识别 → 翻译（看漫画/图片文字用）
 """
 
 
@@ -341,6 +342,13 @@ class Pipeline:
             self._translator = None
             threading.Thread(target=self._rebuild_translator, daemon=True).start()
 
+    def get_translator(self):
+        """获取翻译链（OCR 等不经过音频流水线的功能也用）。未构建时现场构建。"""
+        with self._model_lock:
+            if self._translator is None:
+                self._translator = build_chain(self.cfg["translator"])
+            return self._translator
+
     def _rebuild_translator(self):
         try:
             translator = build_chain(self.cfg["translator"])
@@ -496,6 +504,8 @@ class ToggleBridge(QObject):
     toggle_requested = pyqtSignal()
     subtitle_received = pyqtSignal(dict)  # 上屏负载：kind=live/final
     update_result = pyqtSignal(dict)      # 检查更新结果
+    ocr_requested = pyqtSignal()          # 触发截图选区（须在主线程创建选区层）
+    ocr_result = pyqtSignal(dict)         # OCR+翻译完成：{"src","zh","anchor"}
 
 
 class MainApp:
@@ -535,12 +545,16 @@ class MainApp:
         self.bridge.toggle_requested.connect(self._do_toggle)
         self.bridge.subtitle_received.connect(self._on_subtitle)
         self.bridge.update_result.connect(self._show_update_result)
+        self.bridge.ocr_requested.connect(self._do_ocr_snip)
+        self.bridge.ocr_result.connect(self._show_ocr_result)
 
         # 后台工作线程经 bridge 信号把字幕送进 Qt 主线程（线程安全）
         self.pipeline = Pipeline(self.cfg, self._emit_subtitle)
 
-        self.tray = TrayIcon(on_toggle=self.toggle, on_quit=self.quit, on_settings=self.open_settings)
+        self.tray = TrayIcon(on_toggle=self.toggle, on_quit=self.quit,
+                             on_settings=self.open_settings, on_ocr=self.start_ocr_snip)
         self.tray.set_hotkey(self.cfg.get("hotkey", "alt+t"))
+        self.tray.set_ocr_hotkey(self.cfg.get("hotkey_ocr", "alt+r"))
         self.tray.show()
 
         self.hotkeys = None
@@ -552,6 +566,17 @@ class MainApp:
         except Exception as e:
             # 热键被占用（如另一个实例在运行）不应让程序退出，托盘/设置页仍可操作
             log.warning("全局热键注册失败: %s", e)
+
+        self.ocr_hotkeys = None
+        try:
+            self.ocr_hotkeys = HotkeyManager(
+                app=self.app, hotkey=self.cfg.get("hotkey_ocr", "alt+r"),
+                on_toggle=self.start_ocr_snip, hotkey_id=0xB002,
+            )
+            self.ocr_hotkeys.start()
+        except Exception as e:
+            log.warning("截图翻译热键注册失败: %s", e)
+        self._snip = None
 
         hotkey = self.cfg.get("hotkey", "alt+t")
         tip = (f"按 {hotkey} 开始监听，右键托盘打开设置" if self.hotkeys
@@ -631,6 +656,77 @@ class MainApp:
         self.settings_window.set_position(x, y)
         log.info("字幕位置已定位: (%d, %d)，点“保存并应用”生效", x, y)
 
+    def start_ocr_snip(self):
+        """热键/托盘触发截图翻译：经 bridge 切回主线程创建选区层。"""
+        self.bridge.ocr_requested.emit()
+
+    def _do_ocr_snip(self):
+        from app.ocr_tool import SnipOverlay
+
+        if self._snip is not None:
+            self._snip.close()
+        self._snip = SnipOverlay()
+        self._snip.region_selected.connect(self._on_ocr_region)
+        self._snip.cancelled.connect(lambda: log.info("截图翻译已取消"))
+        self._snip.show()
+
+    def _on_ocr_region(self, rect):
+        from app.ocr_tool import grab_region
+
+        path = grab_region(rect)
+        if path is None:
+            log.warning("截图失败")
+            return
+        lang_cfg = self.cfg.get("language") or {}
+        threading.Thread(
+            target=self._ocr_worker,
+            args=(path, rect, lang_cfg.get("source", "auto"), lang_cfg.get("target", "zh")),
+            daemon=True,
+        ).start()
+
+    def _ocr_worker(self, path, rect, src_lang, target):
+        from app.ocr_tool import ocr_image, pick_ocr_language
+
+        try:
+            lang_tag = None if src_lang == "auto" else pick_ocr_language(src_lang)
+            text = ocr_image(path, lang_tag)
+            lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
+            if not lines:
+                self.bridge.ocr_result.emit({"src": "", "zh": "", "anchor": rect})
+                return
+            # 中日文按字符书写，多行直接拼接；空格分词语言用空格连接
+            sep = "" if src_lang in ("zh", "ja") else " "
+            src = sep.join(lines)
+            zh = None
+            try:
+                zh = self.pipeline.get_translator().translate(
+                    src, None if src_lang == "auto" else src_lang, target
+                )
+            except Exception as e:
+                log.warning("截图翻译失败: %s", e)
+            log.info("OCR [%s]: %s → %s", src_lang, src, zh)
+            self.bridge.ocr_result.emit({"src": src, "zh": zh, "anchor": rect})
+        except Exception as e:
+            log.exception("OCR 失败: %s", e)
+        finally:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+
+    def _show_ocr_result(self, payload):
+        from app.ocr_tool import OcrResultPopup
+
+        if not payload.get("src"):
+            self.tray.showMessage(
+                "实时翻译字幕", "截图区域未识别到文字",
+                QSystemTrayIcon.Information, 3000,
+            )
+            return
+        zh = payload.get("zh") or "…翻译服务暂时不可用…"
+        self._ocr_popup = OcrResultPopup(payload["src"], zh, payload["anchor"])
+        self._ocr_popup.show()
+
     def _check_update(self, auto=False):
         """后台线程查询 GitHub Releases，结果经 bridge 回主线程显示。auto=True 为启动时的静默检查。"""
         from app.updater import check_update
@@ -695,19 +791,20 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
         )
         self.quit()
 
-    def _rebind_hotkey(self, hotkey):
+    def _rebind_hotkey(self, hotkey, on_trigger, old_mgr, hotkey_id=None):
         """运行时切换全局热键：先注册新的，成功后再注销旧的，失败则保持旧热键。"""
         try:
-            mgr = HotkeyManager(app=self.app, hotkey=hotkey, on_toggle=self.toggle)
+            mgr = HotkeyManager(
+                app=self.app, hotkey=hotkey, on_toggle=on_trigger, hotkey_id=hotkey_id
+            )
             mgr.start()
         except Exception as e:
             log.warning("新热键 %s 注册失败: %s", hotkey, e)
-            return False
-        if self.hotkeys is not None:
-            self.hotkeys.stop()
-        self.hotkeys = mgr
+            return None
+        if old_mgr is not None:
+            old_mgr.stop()
         log.info("全局热键已切换: %s", hotkey)
-        return True
+        return mgr
 
     def _live_preview(self, subtitle_cfg):
         """设置页外观改动：立即应用到字幕窗并显示预览（不写配置文件）。"""
@@ -761,16 +858,26 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
 
     def apply_config(self, cfg):
         prev = self._prev_cfg
-        old_hotkey = prev.get("hotkey", "alt+t")
-        new_hotkey = cfg.get("hotkey", "alt+t")
-        if new_hotkey != old_hotkey:
-            if self._rebind_hotkey(new_hotkey):
-                self.tray.set_hotkey(new_hotkey)
+        for key, attr, default, handler, btn_name, hotkey_id in (
+            ("hotkey", "hotkeys", "alt+t", self.toggle, "btn_hotkey", None),
+            ("hotkey_ocr", "ocr_hotkeys", "alt+r", self.start_ocr_snip, "btn_hotkey_ocr", 0xB002),
+        ):
+            old_hotkey = prev.get(key, default)
+            new_hotkey = cfg.get(key, default)
+            if new_hotkey == old_hotkey:
+                continue
+            mgr = self._rebind_hotkey(new_hotkey, handler, getattr(self, attr), hotkey_id)
+            if mgr is not None:
+                setattr(self, attr, mgr)
+                if key == "hotkey":
+                    self.tray.set_hotkey(new_hotkey)
+                else:
+                    self.tray.set_ocr_hotkey(new_hotkey)
             else:
                 # 新热键注册失败：配置回退为仍在生效的旧热键
-                cfg["hotkey"] = old_hotkey
+                cfg[key] = old_hotkey
                 if self.settings_window is not None:
-                    self.settings_window.btn_hotkey.setText(old_hotkey)
+                    getattr(self.settings_window, btn_name).setText(old_hotkey)
                 QMessageBox.warning(
                     None, "热键注册失败",
                     f"热键 {new_hotkey} 注册失败（可能被其他程序占用），已保留原热键 {old_hotkey}。",
@@ -840,6 +947,8 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
         self.pipeline.stop()
         if self.hotkeys is not None:
             self.hotkeys.stop()
+        if self.ocr_hotkeys is not None:
+            self.ocr_hotkeys.stop()
         self.app.quit()
 
     def run(self):

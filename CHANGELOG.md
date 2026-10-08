@@ -6,6 +6,17 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.2.0] - 2026-10-08
+
+### 新增 / Added
+
+- **截图翻译（OCR）**：按 Alt+R（可在设置页自定义）框选屏幕任意区域 → Windows 内置 OCR 识别文字 → 走当前翻译链 → 在选区旁弹窗显示原文和译文。看漫画、游戏内图片文字、不可复制的界面文字都可以直接翻。识别语言跟随设置的源语言（翻译日语需在 Windows 设置 → 时间和语言 → 语言 中安装日语语言包，否则自动降级到已有语言并记日志提示）。托盘菜单也新增"截图翻译"入口。
+  Screenshot translation (OCR): press Alt+R (customizable) to drag-select any screen region → built-in Windows OCR recognizes the text → it goes through your translation chain → a popup next to the region shows original and translation. Great for manga, in-game image text, and non-copyable UI text. OCR language follows the configured source language (Japanese manga requires the Japanese language pack in Windows Settings → Time & Language → Language; otherwise it falls back gracefully).
+- **第二个全局热键**：截图翻译热键与启停热键相互独立，均可在设置页点击捕获修改、一键恢复默认，保存后立即生效，无需重启。
+  Second global hotkey: the OCR hotkey is independent from the start/stop hotkey — both are rebindable with capture-to-set, one-click restore to default, and apply instantly.
+
+---
+
 ## [v1.1.0] - 2026-10-08
 
 ### 新增 / Added
@@ -224,6 +235,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.2.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.0
 [v1.1.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.1.0
 [v1.0.12]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.12
 [v1.0.11]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.11

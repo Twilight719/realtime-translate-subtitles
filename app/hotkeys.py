@@ -48,19 +48,20 @@ class HotkeyManager:
 
     HOTKEY_ID = 0xB001
 
-    def __init__(self, app, hotkey="alt+t", on_toggle=None):
+    def __init__(self, app, hotkey="alt+t", on_toggle=None, hotkey_id=None):
         self.app = app
         self.hotkey = hotkey
         self.on_toggle = on_toggle
+        self.hotkey_id = hotkey_id if hotkey_id is not None else self.HOTKEY_ID
         self._filter = None
         self._mods = None
         self._vk = None
 
     def start(self):
         self._mods, self._vk = parse_hotkey(self.hotkey)
-        if not user32.RegisterHotKey(None, self.HOTKEY_ID, self._mods, self._vk):
+        if not user32.RegisterHotKey(None, self.hotkey_id, self._mods, self._vk):
             raise RuntimeError(f"注册全局热键失败: {self.hotkey}（可能被其他程序占用）")
-        self._filter = _HotkeyFilter(self.HOTKEY_ID, self._handle)
+        self._filter = _HotkeyFilter(self.hotkey_id, self._handle)
         self.app.installNativeEventFilter(self._filter)
 
     def _handle(self):
@@ -68,4 +69,4 @@ class HotkeyManager:
             self.on_toggle()
 
     def stop(self):
-        user32.UnregisterHotKey(None, self.HOTKEY_ID)
+        user32.UnregisterHotKey(None, self.hotkey_id)

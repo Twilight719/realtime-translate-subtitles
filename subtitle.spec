@@ -45,6 +45,9 @@ a = Analysis(
         + collect_submodules("faster_whisper")
         # sensevoice_engine 里是延迟导入，静态分析发现不了，必须显式声明
         + ["sentencepiece", "truststore", "sherpa_onnx"]  # truststore：打包后仍能走系统证书库，否则检查更新报证书错误
+        # ocr_tool 里的 winsdk 导入是函数内延迟导入，静态分析会漏
+        + ["winsdk.windows.media.ocr", "winsdk.windows.graphics.imaging",
+           "winsdk.windows.storage", "winsdk.windows.globalization"]
     ),
     hookspath=[],
     runtime_hooks=["tools/pyi_rth_preload.py"],  # 须在 PyQt5 rthook 之前预加载原生库
