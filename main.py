@@ -685,7 +685,7 @@ class MainApp:
         ).start()
 
     def _ocr_worker(self, path, rect, src_lang, target):
-        from app.ocr_tool import ocr_image, pick_ocr_language
+        from app.ocr_tool import clean_cjk_spacing, ocr_image, pick_ocr_language
 
         try:
             lang_tag = None if src_lang == "auto" else pick_ocr_language(src_lang)
@@ -696,7 +696,7 @@ class MainApp:
                 return
             # 中日文按字符书写，多行直接拼接；空格分词语言用空格连接
             sep = "" if src_lang in ("zh", "ja") else " "
-            src = sep.join(lines)
+            src = clean_cjk_spacing(sep.join(lines))
             zh = None
             try:
                 zh = self.pipeline.get_translator().translate(

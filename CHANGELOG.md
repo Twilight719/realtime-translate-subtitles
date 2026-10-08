@@ -6,6 +6,15 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.2.1] - 2026-10-08
+
+### 修复 / Fixed
+
+- **截图翻译中文/日文识别结果多余空格**：Windows OCR 对中日文会逐字加空格（"你 好 世 界"），直接送翻译会影响质量。现在自动清除 CJK 字符之间的空格后再翻译和显示。
+  Screenshot translation: Windows OCR inserts a space between every CJK character ("你 好 世 界"). These spaces are now stripped before translation and display.
+
+---
+
 ## [v1.2.0] - 2026-10-08
 
 ### 新增 / Added
@@ -235,6 +244,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.2.1]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.1
 [v1.2.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.0
 [v1.1.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.1.0
 [v1.0.12]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.12

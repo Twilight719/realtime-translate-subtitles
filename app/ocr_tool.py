@@ -7,6 +7,7 @@ OCR 用 Windows.Media.Ocr（系统自带，无需下载模型）；识别语言�
 import asyncio
 import logging
 import os
+import re
 import tempfile
 
 from PyQt5.QtCore import QPoint, QRect, Qt, pyqtSignal
@@ -17,6 +18,14 @@ log = logging.getLogger("subtitle")
 
 # 源语言码 → Windows 语言标签
 LANG_TAGS = {"zh": "zh-Hans-CN", "en": "en-US", "ja": "ja-JP", "ko": "ko-KR", "ru": "ru-RU"}
+
+# Windows OCR 对中日文逐字加空格（"你 好 世 界"），翻译前去掉 CJK 字符间的空格
+_CJK = "　-〿぀-ヿ㐀-䶿一-鿿＀-￯"
+_CJK_SPACE = re.compile("(?<=[%s]) +(?=[%s])" % (_CJK, _CJK))
+
+
+def clean_cjk_spacing(text):
+    return _CJK_SPACE.sub("", text)
 
 
 def available_ocr_languages():
