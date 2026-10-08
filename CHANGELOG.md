@@ -6,6 +6,26 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.11] - 2026-09-30
+
+### 新增 / Added
+
+- **新增 large-v3-turbo 识别档位**：识别精准度接近最大的 large-v3，但专为实时设计（解码层仅 4 层），显卡上速度与 small 相当，追求准确度推荐使用。首次选择需下载约 1.6GB，显存多占约 1GB。
+  New `large-v3-turbo` model tier: near-large-v3 accuracy at small-like speed on GPU (turbo is built for real-time use). First use downloads ~1.6 GB and uses ~1 GB more VRAM.
+- **识别提示词**：设置 → 识别模型 → 识别提示词，填入作品名/角色名/术语（如“原神 派蒙 元素爆发”），专有名词识别明显更准。改动立即生效，无需重载模型。
+  Recognition prompt: tell the recognizer background vocabulary (show/character names, terminology) for noticeably better proper-noun accuracy. Applies instantly without reloading the model.
+- **int8_float16 计算精度选项**（cuda）：比 float16 更快、显存更省，质量几乎无损。
+  New `int8_float16` compute type for CUDA: faster and less VRAM than float16 with nearly identical quality.
+
+### 优化 / Improved
+
+- **模型加载后自动预热**：加载完成即跑一遍静音识别，提前完成 CUDA 内核编译与调优，消除第一句话的 1~2 秒卡顿。
+  Warm-up pass right after model load (CUDA kernels pre-compiled), removing the 1–2 s stall on the first sentence.
+- **识别改为单遍模式**：旧版遇到嘈杂音频（游戏 BGM/音效）会触发升温重试、最多重复 8 遍，是长时间使用后延迟越积越高的隐藏原因之一。现在固定单遍出结果，杜绝延迟突刺。
+  Single-pass recognition: the old temperature-fallback could re-run a noisy segment up to 8 times, a hidden cause of growing latency during long sessions. Now it always decodes in one pass.
+
+---
+
 ## [v1.0.10] - 2026-09-30
 
 ### 新增 / Added
@@ -177,6 +197,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.11]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.11
 [v1.0.10]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.10
 [v1.0.9]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.9
 [v1.0.8]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.8

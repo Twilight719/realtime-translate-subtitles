@@ -12,6 +12,19 @@ class Transcriber:
     def __init__(self, model_size="small", device="cuda", compute_type="float16", beam_size=1):
         self.model = self._load_with_fallback(model_size, device, compute_type)
         self.beam_size = beam_size
+        self._warmup()
+
+    def _warmup(self):
+        """加载后跑一遍静音识别：提前完成 CUDA 内核编译与自动调优，
+        否则第一句真实语音要慢 1~2 秒。"""
+        try:
+            self.model.transcribe(
+                np.zeros(16000 // 2, dtype=np.float32),
+                beam_size=1, temperature=0.0,
+            )
+            log.info("识别模型预热完成")
+        except Exception as e:
+            log.warning("识别模型预热失败（不影响使用）: %s", e)
 
     @staticmethod
     def _load_with_fallback(model_size, device, compute_type):
@@ -37,13 +50,18 @@ class Transcriber:
                 last_err = e
         raise last_err
 
-    def transcribe(self, segment, language=None):
+    def transcribe(self, segment, language=None, prompt=None):
         """segment: float32 (N,) 16kHz → (原文, 语言码)；无有效语音返回 ("", None)。
-        language 为 whisper 语言码（如 'en'/'ja'），None 表示自动检测。"""
+        language 为 whisper 语言码（如 'en'/'ja'），None 表示自动检测。
+        prompt 为可选提示词（作品名/术语等），提升专有名词识别准确率。"""
         segments, info = self.model.transcribe(
             segment,
             language=language,  # None = 自动检测
             beam_size=self.beam_size,
+            # 单遍识别：默认的温度回退在嘈杂音频（游戏 BGM/音效）上会反复重试
+            # （最多 8 遍），造成延迟突刺越积越多；固定 0.0 一遍出结果
+            temperature=0.0,
+            initial_prompt=prompt or None,
             vad_filter=False,  # 上游已做过 VAD
             condition_on_previous_text=False,
             no_speech_threshold=0.6,

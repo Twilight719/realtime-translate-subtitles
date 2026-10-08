@@ -670,7 +670,7 @@ class SettingsWindow(QMainWindow):
         f = QFormLayout(box)
 
         self.combo_model = QComboBox()
-        self.combo_model.addItems(["tiny", "base", "small", "medium"])
+        self.combo_model.addItems(["tiny", "base", "small", "medium", "large-v3-turbo"])
         self.combo_model.setCurrentText(w.get("model_size", "small"))
         f.addRow("模型档位", self.combo_model)
 
@@ -680,7 +680,7 @@ class SettingsWindow(QMainWindow):
         f.addRow("运行设备", self.combo_device)
 
         self.combo_compute = QComboBox()
-        self.combo_compute.addItems(["float16", "int8"])
+        self.combo_compute.addItems(["float16", "int8_float16", "int8"])
         self.combo_compute.setCurrentText(w.get("compute_type", "float16"))
         f.addRow("计算精度", self.combo_compute)
 
@@ -688,6 +688,10 @@ class SettingsWindow(QMainWindow):
         self.spin_beam.setRange(1, 5)
         self.spin_beam.setValue(w.get("beam_size", 1))
         f.addRow("Beam size", self.spin_beam)
+
+        self.edit_prompt = QLineEdit(w.get("prompt") or "")
+        self.edit_prompt.setPlaceholderText("可选：作品名 / 角色名 / 术语，如：原神 派蒙 元素爆发")
+        f.addRow("识别提示词", self.edit_prompt)
         v.addWidget(box)
 
         hint = QLabel("识别参数改动后自动重启监听生效（需重新加载模型，等待几秒）。")
@@ -698,10 +702,14 @@ class SettingsWindow(QMainWindow):
         v.addWidget(make_help_widget([
             "源语言：听到的语言。自动检测适合视频里多国语言混说；看单一语言视频时锁定，识别更快更准。",
             "目标语言：字幕翻译成的语言。改动保存后立即生效，无需重启。",
-            "模型档位：识别用的模型大小。tiny/base 最快但错字多；small 均衡（推荐）；medium 最准但可能跟不上语速。",
+            "模型档位：tiny/base 最快但错字多；small 均衡；large-v3-turbo 最准，专为实时设计，"
+            "显卡上速度和 small 相当（首次需下载约 1.6GB，显存多占约 1GB），追求准确度推荐它。",
             "运行设备：cuda = 用显卡识别（快）；cpu = 用处理器（慢 3~5 倍），显卡被占满时才考虑。",
-            "计算精度：与运行设备配对使用，cuda 选 float16，cpu 选 int8。",
+            "计算精度：cuda 选 float16 或 int8_float16（更快、显存更省，质量几乎无损）；cpu 选 int8。",
             "Beam size：识别时每步比较的候选数量。1 最快（实时字幕推荐）；3~5 略准但明显变慢。",
+            "识别提示词：告诉模型当前内容的背景词汇（作品名/角色名/术语），专有名词识别明显更准；"
+            "改动立即生效，不会重载模型。",
+            "识别为单遍模式：嘈杂音频（BGM/音效）不会反复重试，避免延迟累积。",
         ]))
         v.addStretch()
         self.pages.addWidget(page)
@@ -1074,6 +1082,7 @@ class SettingsWindow(QMainWindow):
         w["device"] = self.combo_device.currentText()
         w["compute_type"] = self.combo_compute.currentText()
         w["beam_size"] = self.spin_beam.value()
+        w["prompt"] = self.edit_prompt.text().strip() or None
 
         t = cfg["translator"]
         t["order"] = [

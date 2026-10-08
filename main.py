@@ -106,10 +106,11 @@ audio:
   device_name:             # null = 默认扬声器 loopback；也可填 audio_capture.py 自测列出的设备名
 
 whisper:
-  model_size: small        # tiny / base / small / medium
+  model_size: small        # tiny / base / small / medium / large-v3-turbo（最准，首次需下载约 1.6GB）
   device: cuda             # cuda / cpu
-  compute_type: float16    # cuda 用 float16；cpu 建议 int8
+  compute_type: float16    # cuda 用 float16 或 int8_float16（更快更省显存）；cpu 建议 int8
   beam_size: 1             # 1 = 最快；提到 3~5 质量略好但更慢
+  prompt:                  # 识别提示词（可选）：作品名/角色名/术语，如“原神 派蒙 元素爆发”，专名更准
 
 vad:
   threshold: 0.5
@@ -182,6 +183,13 @@ def pick_device(name):
         if name in dev.name:
             return dev
     raise RuntimeError(f"找不到音频设备: {name}")
+
+
+def _whisper_model_params(w):
+    """识别模型重建只关心这些参数；prompt 等热更新参数不参与对比。"""
+    w = dict(w or {})
+    w.pop("prompt", None)
+    return w
 
 
 class Pipeline:
@@ -421,7 +429,10 @@ class Pipeline:
             try:
                 tag = "实时快照" if is_partial else "语音片段"
                 log.info("%s %.1fs，开始识别", tag, len(seg) / 16000)
-                text, lang = self._transcriber.transcribe(seg, language=self._source_lock())
+                text, lang = self._transcriber.transcribe(
+                    seg, language=self._source_lock(),
+                    prompt=(self.cfg.get("whisper") or {}).get("prompt"),
+                )
                 if not text:
                     continue
                 if is_partial:
@@ -722,7 +733,7 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
                     None, "热键注册失败",
                     f"热键 {new_hotkey} 注册失败（可能被其他程序占用），已保留原热键 {old_hotkey}。",
                 )
-        reload_transcriber = cfg.get("whisper", {}) != prev.get("whisper", {})
+        reload_transcriber = _whisper_model_params(cfg.get("whisper")) != _whisper_model_params(prev.get("whisper"))
         reload_translator = cfg.get("translator", {}) != prev.get("translator", {})
         save_config(cfg)
         self.cfg = cfg
