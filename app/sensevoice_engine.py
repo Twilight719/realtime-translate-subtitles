@@ -82,7 +82,9 @@ class SenseVoiceTranscriber:
         self.recognizer.decode_stream(stream)
         result = stream.result
         text = _TAG_RE.sub("", result.text).strip()
-        lang = _TAG_RE.sub("", getattr(result, "lang", "") or "").strip() or None
+        # result.lang 形如 "<|ja|>"，提取尖括号内的语言码
+        m = re.search(r"<\|([a-z]{2,3})\|>", getattr(result, "lang", "") or "")
+        lang = m.group(1) if m else None
         if not text:
             return "", None
         return text, lang
