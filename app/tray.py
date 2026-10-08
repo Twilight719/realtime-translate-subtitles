@@ -6,6 +6,9 @@ from PyQt5.QtCore import Qt
 from PyQt5.QtGui import QColor, QIcon, QPainter, QPixmap
 from PyQt5.QtWidgets import QAction, QMenu, QSystemTrayIcon
 
+from .i18n import tr
+from . import i18n_strings  # noqa: F401  注册中英文映射
+
 ICON_PATH = os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "assets", "icon.png"
 )
@@ -43,18 +46,18 @@ def _make_icon(color):
 class TrayIcon(QSystemTrayIcon):
     def __init__(self, on_toggle, on_quit, on_settings=None, on_ocr=None, parent=None):
         super().__init__(_make_icon("#888888"), parent)
-        self.setToolTip("实时翻译字幕（已停止）")
+        self.setToolTip(tr("实时翻译字幕（已停止）"))
 
         # QAction 必须挂在 self 上，否则 Python 引用被回收后菜单项会消失
-        self.action_toggle = QAction("开始 (Alt+T)", self)
+        self.action_toggle = QAction(tr("开始") + " (Alt+T)", self)
         self.action_toggle.triggered.connect(on_toggle)
-        self.action_ocr = QAction("截图翻译 (Ctrl+Alt+R)", self)
+        self.action_ocr = QAction(tr("截图翻译") + " (Ctrl+Alt+R)", self)
         if on_ocr:
             self.action_ocr.triggered.connect(on_ocr)
-        self.action_settings = QAction("设置", self)
+        self.action_settings = QAction(tr("设置"), self)
         if on_settings:
             self.action_settings.triggered.connect(on_settings)
-        self.action_quit = QAction("退出", self)
+        self.action_quit = QAction(tr("退出"), self)
         self.action_quit.triggered.connect(on_quit)
 
         menu = QMenu()
@@ -77,12 +80,12 @@ class TrayIcon(QSystemTrayIcon):
 
     def set_ocr_hotkey(self, hotkey):
         self.action_ocr.setText(
-            "截图翻译 (" + "+".join(p.capitalize() for p in hotkey.split("+")) + ")"
+            tr("截图翻译") + " (" + "+".join(p.capitalize() for p in hotkey.split("+")) + ")"
         )
 
     def _refresh_toggle_text(self):
         self.action_toggle.setText(
-            f"{'停止' if self._running else '开始'} ({self._hotkey_label})"
+            f"{tr('停止') if self._running else tr('开始')} ({self._hotkey_label})"
         )
 
     def _on_activated(self, reason):
@@ -94,8 +97,8 @@ class TrayIcon(QSystemTrayIcon):
         self._running = running
         if running:
             self.setIcon(_make_icon("#4CAF50"))
-            self.setToolTip("实时翻译字幕（运行中）")
+            self.setToolTip(tr("实时翻译字幕（运行中）"))
         else:
             self.setIcon(_make_icon("#888888"))
-            self.setToolTip("实时翻译字幕（已停止）")
+            self.setToolTip(tr("实时翻译字幕（已停止）"))
         self._refresh_toggle_text()

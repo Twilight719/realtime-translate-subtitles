@@ -70,3 +70,8 @@ class HotkeyManager:
 
     def stop(self):
         user32.UnregisterHotKey(None, self.hotkey_id)
+        # 必须把事件过滤器从 QApplication 移除：不移除的话，旧管理器被回收后
+        # Qt 的过滤器链表里会留下悬挂指针，导致后续热键消息不再派发（热键静默失灵）
+        if self._filter is not None:
+            self.app.removeNativeEventFilter(self._filter)
+            self._filter = None

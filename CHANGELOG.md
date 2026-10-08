@@ -6,6 +6,22 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.0] - 2026-10-08
+
+### 新增 / Added
+
+- **界面多语言**：设置 → 主页 → 界面 → 界面语言，支持 中文 / English，覆盖设置窗口、托盘菜单、弹窗提示、字幕状态提示等全部界面文字（重启后完全生效）。
+  UI language setting (Settings → Home → Interface → Language): Simplified Chinese or English, covering the settings window, tray menu, dialogs and subtitle status messages (takes full effect after restart).
+- **截图翻译弹窗自定义**：设置 → 字幕外观 → 截图翻译弹窗，可调弹窗停留时长（0 = 不自动关闭，点击关闭）、字号、背景不透明度。弹窗现在默认 8 秒自动关闭。
+  Customizable screenshot-translation popup: duration (0 = stay until clicked), font size, and background opacity (Settings → Subtitle Appearance). The popup now auto-closes after 8 seconds by default.
+
+### 修复 / Fixed
+
+- **截图翻译热键偶发失灵**：修改热键后旧的事件过滤器没有从 Qt 移除，被回收后留下悬挂指针，导致热键消息静默丢失（表现为一段时间后按热键无反应）。
+  Fixed screenshot hotkey silently dying: rebinding a hotkey left a dangling native event filter in Qt's filter chain after the old manager was garbage-collected, which eventually swallowed hotkey messages.
+
+---
+
 ## [v1.2.2] - 2026-10-08
 
 ### 变更 / Changed
@@ -253,6 +269,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.3.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.3.0
 [v1.2.2]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.2
 [v1.2.1]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.1
 [v1.2.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.2.0

@@ -23,10 +23,10 @@ from app.tray import TrayIcon
 
 cfg = main.load_config()
 # 旧用户的 config.yaml 没有 hotkey_ocr，代码各处用 cfg.get(..., "alt+r") 兜底
-print("config hotkey_ocr:", cfg.get("hotkey_ocr", "（旧配置缺省 → alt+r）"))
+print("config hotkey_ocr:", cfg.get("hotkey_ocr", "（旧配置缺省 → ctrl+alt+r）"))
 
 win = SettingsWindow(cfg, history_provider=lambda: [])
-assert win.btn_hotkey_ocr.hotkey() == cfg.get("hotkey_ocr", "alt+r")
+assert win.btn_hotkey_ocr.hotkey() == cfg.get("hotkey_ocr", "ctrl+alt+r")
 print("设置页 OCR 热键按钮 OK:", win.btn_hotkey_ocr.hotkey())
 
 tray = TrayIcon(on_toggle=lambda: None, on_quit=lambda: None, on_ocr=lambda: None)

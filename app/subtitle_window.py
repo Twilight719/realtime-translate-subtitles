@@ -12,6 +12,9 @@ from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter
 from PyQt5.QtWidgets import QLabel, QVBoxLayout, QWidget
 
+from .i18n import tr
+from . import i18n_strings  # noqa: F401  注册中英文映射
+
 
 def _stable_tail_html(stable, tail, stable_color, tail_color):
     html = f'<span style="color:{stable_color};">{escape(stable)}</span>'
@@ -200,7 +203,7 @@ class SubtitleWindow(QWidget):
         self._drag_saved_through = self.click_through
         self.click_through = False
         self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
-        self.update_text("Drag me to the position you like", "拖动我到想要的位置，完成后点“完成定位”")
+        self.update_text("Drag me to the position you like", tr("拖动我到想要的位置，完成后点“完成定位”"))
         self._idle_timer.stop()
         self._fade_timer.stop()
         self.setWindowOpacity(1.0)

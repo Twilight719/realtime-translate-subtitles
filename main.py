@@ -77,6 +77,8 @@ QCoreApplication.addLibraryPath(
 
 from app.audio_capture import AudioCapture, get_default_loopback, list_loopback_devices
 from app.hotkeys import HotkeyManager
+from app.i18n import set_language, tr
+import app.i18n_strings  # noqa: F401  注册中英文映射
 from app.live_caption import LiveCaptionState
 from app.subtitle_window import SubtitleWindow
 from app.transcriber import Transcriber
@@ -153,8 +155,14 @@ subtitle:
   zh_color: '#FFE34D'
   src_color: '#FFFFFF'
 
+ocr:
+  duration_ms: 8000        # 截图翻译弹窗停留毫秒数（0=不自动关闭，点击关闭）
+  font_size: 15            # 弹窗字号
+  bg_alpha: 235            # 弹窗背景不透明度（0~255）
+
 ui:
   font_size: 13            # 设置界面字体大小（10~22），改大后窗口可手动拉大
+  language: zh             # 界面语言：zh=中文；en=English（重启后生效）
 
 app:
   autostart: false         # 开机自动启动（托盘常驻）
@@ -193,13 +201,13 @@ def pick_device(name, source="loopback"):
         for dev in list_input_devices():
             if name in dev.name:
                 return dev
-        raise RuntimeError(f"找不到麦克风: {name}")
+        raise RuntimeError(tr("找不到麦克风: {name}").format(name=name))
     if not name:
         return get_default_loopback()
     for dev in list_loopback_devices():
         if name in dev.name:
             return dev
-    raise RuntimeError(f"找不到音频设备: {name}")
+    raise RuntimeError(tr("找不到音频设备: {name}").format(name=name))
 
 
 def _whisper_model_params(w):
@@ -364,7 +372,7 @@ class Pipeline:
             # 加载完成后告知用户（首次下载模型可能需要几分钟，之前没有任何就绪提示）
             if self._cap is not None:
                 log.info("模型已就绪")
-                self.on_subtitle({"kind": "info", "zh": "模型已就绪，开始监听"})
+                self.on_subtitle({"kind": "info", "zh": tr("模型已就绪，开始监听")})
         except Exception as e:
             self._model_error = e
             self._model_ready.set()
@@ -431,7 +439,7 @@ class Pipeline:
         except Exception:
             # 线程意外死亡 = 流水线无声坏死（不出字幕且无日志），必须留下痕迹
             log.exception("识别工作线程意外退出！请把此日志反馈给开发者")
-            self.on_subtitle({"kind": "info", "zh": "内部错误：识别线程异常退出，请停止后重新开始"})
+            self.on_subtitle({"kind": "info", "zh": tr("内部错误：识别线程异常退出，请停止后重新开始")})
         finally:
             log.info("识别工作线程已退出")
 
@@ -441,7 +449,7 @@ class Pipeline:
         if self._model_error is not None:
             self.on_subtitle({
                 "kind": "final", "src": "",
-                "zh": f"模型加载失败：{self._model_error}。请检查网络后重新按热键重试",
+                "zh": tr("模型加载失败：{err}。请检查网络后重新按热键重试").format(err=self._model_error),
             })
             return
         live = LiveCaptionState(
@@ -491,7 +499,7 @@ class Pipeline:
                         log.warning("翻译整体失败，先显示原文: %s", e)
                     self.on_subtitle({
                         "kind": "final", "src": text,
-                        "zh": zh if zh else "…翻译服务暂时不可用…",
+                        "zh": zh if zh else tr("…翻译服务暂时不可用…"),
                     })
                     log.info("识别 [%s]: %s → %s", lang, text, zh)
             except Exception as e:
@@ -511,6 +519,8 @@ class ToggleBridge(QObject):
 class MainApp:
     def __init__(self):
         self.cfg = load_config()
+        # 界面语言须在创建任何窗口前生效（托盘/设置页的 tr() 在构建时取值）
+        set_language((self.cfg.get("ui") or {}).get("language", "zh"))
         # 上一次已生效配置的快照（设置页与主程序共享同一个 cfg 对象，
         # 直接对比 old/new 会永远相等，必须用独立快照判断哪些变了）
         self._prev_cfg = copy.deepcopy(self.cfg)
@@ -579,10 +589,10 @@ class MainApp:
         self._snip = None
 
         hotkey = self.cfg.get("hotkey", "alt+t")
-        tip = (f"按 {hotkey} 开始监听，右键托盘打开设置" if self.hotkeys
-               else f"热键 {hotkey} 被占用（是否有另一个实例在运行？），可右键托盘操作")
+        tip = (tr("按 {hk} 开始监听，右键托盘打开设置").format(hk=hotkey) if self.hotkeys
+               else tr("热键 {hk} 被占用（是否有另一个实例在运行？），可右键托盘操作").format(hk=hotkey))
         self.tray.showMessage(
-            "实时翻译字幕", tip,
+            tr("实时翻译字幕"), tip,
             QSystemTrayIcon.Information, 3000,
         )
 
@@ -719,12 +729,14 @@ class MainApp:
 
         if not payload.get("src"):
             self.tray.showMessage(
-                "实时翻译字幕", "截图区域未识别到文字",
+                tr("实时翻译字幕"), tr("截图区域未识别到文字"),
                 QSystemTrayIcon.Information, 3000,
             )
             return
-        zh = payload.get("zh") or "…翻译服务暂时不可用…"
-        self._ocr_popup = OcrResultPopup(payload["src"], zh, payload["anchor"])
+        zh = payload.get("zh") or tr("…翻译服务暂时不可用…")
+        self._ocr_popup = OcrResultPopup(
+            payload["src"], zh, payload["anchor"], self.cfg.get("ocr") or {}
+        )
         self._ocr_popup.show()
 
     def _check_update(self, auto=False):
@@ -745,8 +757,8 @@ class MainApp:
             self._latest_update = result
             if auto:
                 self.tray.showMessage(
-                    "实时翻译字幕",
-                    f"发现新版本 {result['latest']}，点击此通知打开设置页下载更新",
+                    tr("实时翻译字幕"),
+                    tr("发现新版本 {latest}，点击此通知打开设置页下载更新").format(latest=result["latest"]),
                     QSystemTrayIcon.Information, 8000,
                 )
             if self.settings_window is not None:
@@ -759,8 +771,8 @@ class MainApp:
         （保留 config.yaml、models、日志），然后重新启动。镜像下载见 updater.py。"""
         if not getattr(sys, "frozen", False):
             QMessageBox.information(
-                None, "开发模式",
-                f"开发环境不执行自动替换。新版本文件位于：\n{new_app_dir}",
+                None, tr("开发模式"),
+                tr("开发环境不执行自动替换。新版本文件位于：\n{path}").format(path=new_app_dir),
             )
             return
         import subprocess
@@ -811,7 +823,7 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
         self.window.apply_config(subtitle_cfg)
         if self.settings_window is not None and self.settings_window.isVisible():
             self.window.update_text(
-                "Live preview of the subtitle style.", "实时预览：样式改动即时生效"
+                "Live preview of the subtitle style.", tr("实时预览：样式改动即时生效")
             )
 
     def get_history(self):
@@ -831,7 +843,7 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
             self.settings_window.request_apply.connect(self.apply_config)
             self.settings_window.request_preview.connect(
                 lambda: self.window.update_text(
-                    "This is a preview of the subtitle style.", "这是字幕样式预览。"
+                    "This is a preview of the subtitle style.", tr("这是字幕样式预览。")
                 )
             )
             self.settings_window.request_drag_start.connect(self.window.enter_drag_mode)
@@ -879,8 +891,10 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
                 if self.settings_window is not None:
                     getattr(self.settings_window, btn_name).setText(old_hotkey)
                 QMessageBox.warning(
-                    None, "热键注册失败",
-                    f"热键 {new_hotkey} 注册失败（可能被其他程序占用），已保留原热键 {old_hotkey}。",
+                    None, tr("热键注册失败"),
+                    tr("热键 {hk} 注册失败（可能被其他程序占用），已保留原热键 {old}。").format(
+                        hk=new_hotkey, old=old_hotkey
+                    ),
                 )
         reload_transcriber = _whisper_model_params(cfg.get("whisper")) != _whisper_model_params(prev.get("whisper"))
         reload_translator = cfg.get("translator", {}) != prev.get("translator", {})
@@ -911,7 +925,7 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
             self.settings_window.refresh_info()
         log.info("配置已保存并应用")
         self.tray.showMessage(
-            "实时翻译字幕", "配置已保存并应用",
+            tr("实时翻译字幕"), tr("配置已保存并应用"),
             QSystemTrayIcon.Information, 1500,
         )
 
@@ -932,7 +946,7 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
                     # 模型未就绪时先给用户明确反馈（首次运行要下载约 460MB 识别模型），
                     # 就绪后 Pipeline 会再发一条"模型已就绪"提示
                     self.window.update_text(
-                        "", "正在加载模型…（首次运行需下载识别模型约 460MB，请保持网络畅通）"
+                        "", tr("正在加载模型…（首次运行需下载识别模型约 460MB，请保持网络畅通）")
                     )
                     log.info("已开始监听，模型加载中（首次需下载约 460MB）")
                 else:
@@ -941,7 +955,7 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
                 self.settings_window.set_running(self.pipeline.running)
         except Exception as e:
             log.exception("切换出错")
-            QMessageBox.critical(None, "错误", str(e))
+            QMessageBox.critical(None, tr("错误"), str(e))
 
     def quit(self):
         self.pipeline.stop()

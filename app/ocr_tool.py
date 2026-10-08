@@ -14,6 +14,9 @@ from PyQt5.QtCore import QPoint, QRect, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen
 from PyQt5.QtWidgets import QApplication, QLabel, QWidget
 
+from .i18n import tr
+from . import i18n_strings  # noqa: F401  注册中英文映射
+
 log = logging.getLogger("subtitle")
 
 # 源语言码 → Windows 语言标签
@@ -129,18 +132,21 @@ class SnipOverlay(QWidget):
 class OcrResultPopup(QWidget):
     """译文弹窗：显示在选区附近，点击或超时自动关闭。"""
 
-    def __init__(self, src, zh, anchor: QRect):
+    def __init__(self, src, zh, anchor: QRect, cfg=None):
         super().__init__()
+        cfg = cfg or {}
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         label = QLabel(self)
+        font_size = int(cfg.get("font_size", 15))
+        bg_alpha = int(cfg.get("bg_alpha", 235))
         label.setStyleSheet(
-            "background: rgba(23,23,29,235); color: #FFE34D; border-radius: 8px;"
-            "padding: 12px 16px; font-family: 'Microsoft YaHei'; font-size: 15px;"
+            f"background: rgba(23,23,29,{bg_alpha}); color: #FFE34D; border-radius: 8px;"
+            f"padding: 12px 16px; font-family: 'Microsoft YaHei'; font-size: {font_size}px;"
         )
-        text = zh if zh else "（无译文）"
+        text = zh if zh else tr("（无译文）")
         if src:
-            text = f"{text}\n\n<span style='color:#9a9aa5;font-size:12px'>{src}</span>"
+            text = f"{text}\n\n<span style='color:#9a9aa5;font-size:{max(font_size - 3, 9)}px'>{src}</span>"
         label.setText(text)
         label.setWordWrap(True)
         label.setMaximumWidth(520)
@@ -154,6 +160,12 @@ class OcrResultPopup(QWidget):
         if y + self.height() > screen.bottom():
             y = anchor.top() - self.height() - 8
         self.move(max(screen.left() + 10, x), max(screen.top() + 10, y))
+
+        duration = int(cfg.get("duration_ms", 8000))
+        if duration > 0:
+            from PyQt5.QtCore import QTimer
+
+            QTimer.singleShot(duration, self.close)
 
     def mousePressEvent(self, e):
         self.close()

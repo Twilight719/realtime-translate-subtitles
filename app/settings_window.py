@@ -40,10 +40,14 @@ from .version import __version__
 try:
     from .paths import base_dir
     from .hotkeys import parse_hotkey
+    from .i18n import tr
+    from . import i18n_strings  # noqa: F401  注册中英文映射
 except ImportError:  # 直接运行本文件做界面预览时
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from app.paths import base_dir
     from app.hotkeys import parse_hotkey
+    from app.i18n import tr
+    import app.i18n_strings  # noqa: F401
 
 QSS = """
 QMainWindow, QWidget { background: #1e1e26; color: #e6e6ea; font-family: "Microsoft YaHei"; font-size: __FS__px; }
@@ -119,7 +123,7 @@ class SliderSpin(QWidget):
         self.stack.addWidget(self.spin)
 
         self.btn_mode = QPushButton("✎")
-        self.btn_mode.setToolTip("切换 拖动条 / 精确数值输入")
+        self.btn_mode.setToolTip(tr("切换 拖动条 / 精确数值输入"))
         self.btn_mode.setFixedWidth(34)
         self.btn_mode.clicked.connect(self._toggle_mode)
 
@@ -174,7 +178,7 @@ class HotkeyCaptureButton(QPushButton):
     def _begin_capture(self):
         self._capturing = True
         self._original = self.text()
-        self.setText("请按下新热键…（Esc 取消）")
+        self.setText(tr("请按下新热键…（Esc 取消）"))
         self.grabKeyboard()
 
     def _end_capture(self, text=None):
@@ -195,7 +199,7 @@ class HotkeyCaptureButton(QPushButton):
         name = self._key_name(key)
         if name is None:
             self._end_capture()
-            QMessageBox.warning(self, "不支持的热键", "只支持 字母 / 数字 / F1~F12 与 Ctrl/Alt/Shift/Win 的组合。")
+            QMessageBox.warning(self, tr("不支持的热键"), tr("只支持 字母 / 数字 / F1~F12 与 Ctrl/Alt/Shift/Win 的组合。"))
             return
         mods = e.modifiers()
         parts = []
@@ -209,7 +213,7 @@ class HotkeyCaptureButton(QPushButton):
             parts.append("win")
         if not parts:
             # 不带修饰键的裸键会劫持正常打字，必须组合使用
-            self.setText("需同时按住 Ctrl/Alt/Shift 之一，请重按…")
+            self.setText(tr("需同时按住 Ctrl/Alt/Shift 之一，请重按…"))
             return
         parts.append(name)
         self._end_capture("+".join(parts))
@@ -231,7 +235,7 @@ def make_help_widget(lines):
     v = QVBoxLayout(container)
     v.setContentsMargins(0, 4, 0, 0)
     v.setSpacing(4)
-    btn = QPushButton("各项说明 ▾")
+    btn = QPushButton(tr("各项说明 ▾"))
     btn.setObjectName("helpToggle")
     btn.setCheckable(True)
     detail = QLabel("\n".join(lines))
@@ -241,7 +245,7 @@ def make_help_widget(lines):
 
     def _toggle(on):
         detail.setVisible(on)
-        btn.setText("各项说明 ▴" if on else "各项说明 ▾")
+        btn.setText(tr("各项说明 ▴") if on else tr("各项说明 ▾"))
 
     btn.toggled.connect(_toggle)
     v.addWidget(btn)
@@ -250,11 +254,11 @@ def make_help_widget(lines):
 
 
 BACKENDS = {
-    "youdao_web": ("有道翻译（在线）", "国内直连，无需 key，质量良好"),
-    "mymemory": ("MyMemory（在线）", "免费无需 key，备用"),
-    "google_web": ("Google 翻译（在线）", "需要能访问 Google 的网络"),
-    "llm_api": ("大模型 API", "DeepSeek/豆包/GPT 等，口语质量最好，需填 key"),
-    "nllb": ("NLLB 本地模型", "离线兜底，无需网络，速度较慢"),
+    "youdao_web": (tr("有道翻译（在线）"), tr("国内直连，无需 key，质量良好")),
+    "mymemory": (tr("MyMemory（在线）"), tr("免费无需 key，备用")),
+    "google_web": (tr("Google 翻译（在线）"), tr("需要能访问 Google 的网络")),
+    "llm_api": (tr("大模型 API"), tr("DeepSeek/豆包/GPT 等，口语质量最好，需填 key")),
+    "nllb": (tr("NLLB 本地模型"), tr("离线兜底，无需网络，速度较慢")),
 }
 
 
@@ -287,7 +291,7 @@ class SettingsWindow(QMainWindow):
         super().__init__()
         self.cfg = cfg
         self._history_provider = history_provider
-        self.setWindowTitle(f"实时翻译字幕 · 设置 v{__version__}")
+        self.setWindowTitle(tr("实时翻译字幕 · 设置 v{ver}").format(ver=__version__))
         self.resize(760, 560)
         self._ui_font = (cfg.get("ui") or {}).get("font_size", 13)
         self.setStyleSheet(build_qss(self._ui_font))
@@ -302,7 +306,7 @@ class SettingsWindow(QMainWindow):
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setFixedWidth(150)
         for name in ["主页", "字幕外观", "识别模型", "翻译服务", "字幕记录", "日志"]:
-            self.sidebar.addItem(QListWidgetItem(name))
+            self.sidebar.addItem(QListWidgetItem(tr(name)))
         layout.addWidget(self.sidebar)
 
         right = QWidget()
@@ -331,7 +335,7 @@ class SettingsWindow(QMainWindow):
 
         apply_bar = QHBoxLayout()
         apply_bar.addStretch()
-        self.btn_apply = QPushButton("保存并应用")
+        self.btn_apply = QPushButton(tr("保存并应用"))
         self.btn_apply.setObjectName("primary")
         self.btn_apply.setMinimumWidth(140)
         self.btn_apply.clicked.connect(self._on_apply)
@@ -351,90 +355,97 @@ class SettingsWindow(QMainWindow):
         page = QWidget()
         v = QVBoxLayout(page)
 
-        box = QGroupBox("运行状态")
+        box = QGroupBox(tr("运行状态"))
         h = QHBoxLayout(box)
         self.status_dot = QLabel("●")
         self.status_dot.setObjectName("statusDot")
-        self.status_label = QLabel("已停止")
+        self.status_label = QLabel(tr("已停止"))
         self.status_label.setFont(QFont("Microsoft YaHei", 14, QFont.Bold))
         h.addWidget(self.status_dot)
         h.addWidget(self.status_label)
         h.addStretch()
-        self.btn_toggle = QPushButton("开始监听")
+        self.btn_toggle = QPushButton(tr("开始监听"))
         self.btn_toggle.setObjectName("primary")
         self.btn_toggle.setMinimumSize(120, 40)
         self.btn_toggle.clicked.connect(self.request_toggle.emit)
         h.addWidget(self.btn_toggle)
         v.addWidget(box)
 
-        info = QGroupBox("当前配置")
+        info = QGroupBox(tr("当前配置"))
         f = QFormLayout(info)
         self.info_hotkey = QLabel()
         self.info_device = QLabel()
         self.info_model = QLabel()
         self.info_backend = QLabel()
-        f.addRow("全局热键", self.info_hotkey)
-        f.addRow("音频来源", self.info_device)
-        f.addRow("识别模型", self.info_model)
-        f.addRow("翻译后端", self.info_backend)
+        f.addRow(tr("全局热键"), self.info_hotkey)
+        f.addRow(tr("音频来源"), self.info_device)
+        f.addRow(tr("识别模型"), self.info_model)
+        f.addRow(tr("翻译后端"), self.info_backend)
         v.addWidget(info)
 
-        hk_box = QGroupBox("全局热键")
+        hk_box = QGroupBox(tr("全局热键"))
         hf = QFormLayout(hk_box)
         hk_row = QHBoxLayout()
         self.btn_hotkey = HotkeyCaptureButton(self.cfg.get("hotkey", DEFAULT_HOTKEY))
         self.btn_hotkey.setMinimumWidth(140)
-        btn_hk_default = QPushButton("恢复默认 (Alt+T)")
+        btn_hk_default = QPushButton(tr("恢复默认 (Alt+T)"))
         btn_hk_default.clicked.connect(lambda: self.btn_hotkey.setText(DEFAULT_HOTKEY))
         hk_row.addWidget(self.btn_hotkey)
         hk_row.addWidget(btn_hk_default)
         hk_row.addStretch()
-        hf.addRow("启停监听", hk_row)
+        hf.addRow(tr("启停监听"), hk_row)
         ocr_row = QHBoxLayout()
         self.btn_hotkey_ocr = HotkeyCaptureButton(
             self.cfg.get("hotkey_ocr", DEFAULT_HOTKEY_OCR)
         )
         self.btn_hotkey_ocr.setMinimumWidth(140)
-        btn_ocr_default = QPushButton("恢复默认 (Ctrl+Alt+R)")
+        btn_ocr_default = QPushButton(tr("恢复默认 (Ctrl+Alt+R)"))
         btn_ocr_default.clicked.connect(
             lambda: self.btn_hotkey_ocr.setText(DEFAULT_HOTKEY_OCR)
         )
         ocr_row.addWidget(self.btn_hotkey_ocr)
         ocr_row.addWidget(btn_ocr_default)
         ocr_row.addStretch()
-        hf.addRow("截图翻译", ocr_row)
-        hk_hint = QLabel("点击左侧按钮后按下新的组合键（Ctrl/Alt/Shift + 字母/数字/F1~F12），“保存并应用”后立即生效。")
+        hf.addRow(tr("截图翻译"), ocr_row)
+        hk_hint = QLabel(tr("点击左侧按钮后按下新的组合键（Ctrl/Alt/Shift + 字母/数字/F1~F12），“保存并应用”后立即生效。"))
         hk_hint.setObjectName("hint")
         hk_hint.setWordWrap(True)
         hf.addRow(hk_hint)
         v.addWidget(hk_box)
 
-        audio_box = QGroupBox("音频来源")
+        audio_box = QGroupBox(tr("音频来源"))
         adf = QFormLayout(audio_box)
         self.combo_audio = QComboBox()
-        adf.addRow("输入设备", self.combo_audio)
-        audio_hint = QLabel("系统声音 = 游戏 / 视频 / 播放器；麦克风 = 会议、网课、语音聊天。改动“保存并应用”后自动重启监听。")
+        adf.addRow(tr("输入设备"), self.combo_audio)
+        audio_hint = QLabel(tr("系统声音 = 游戏 / 视频 / 播放器；麦克风 = 会议、网课、语音聊天。改动“保存并应用”后自动重启监听。"))
         audio_hint.setObjectName("hint")
         audio_hint.setWordWrap(True)
         adf.addRow(audio_hint)
         v.addWidget(audio_box)
         self._refresh_audio_devices()
 
-        stat = QGroupBox("统计")
+        stat = QGroupBox(tr("统计"))
         fh = QFormLayout(stat)
         self.stat_count = QLabel("0")
-        fh.addRow("本次会话字幕", self.stat_count)
+        fh.addRow(tr("本次会话字幕"), self.stat_count)
         v.addWidget(stat)
 
-        ui_box = QGroupBox("界面")
+        ui_box = QGroupBox(tr("界面"))
         uf = QFormLayout(ui_box)
         self.spin_ui_font = SliderSpin(10, 22, self._ui_font, suffix="px")
         self.spin_ui_font.valueChanged.connect(self._apply_ui_font)
-        uf.addRow("界面字体大小", self.spin_ui_font)
-        ui_hint = QLabel("拖动即可看到效果；“保存并应用”后下次打开保持。")
+        uf.addRow(tr("界面字体大小"), self.spin_ui_font)
+        self.combo_ui_lang = QComboBox()
+        for code, name in [("zh", tr("中文")), ("en", "English")]:
+            self.combo_ui_lang.addItem(name, code)
+        ui_cfg = self.cfg.get("ui") or {}
+        idx = self.combo_ui_lang.findData(ui_cfg.get("language", "zh"))
+        self.combo_ui_lang.setCurrentIndex(max(0, idx))
+        uf.addRow(tr("界面语言 / Language"), self.combo_ui_lang)
+        ui_hint = QLabel(tr("拖动即可看到效果；“保存并应用”后下次打开保持。界面语言在重启软件后完全生效。"))
         ui_hint.setObjectName("hint")
         uf.addRow(ui_hint)
-        self.chk_autostart = QCheckBox("开机自动启动（托盘常驻，不弹窗）")
+        self.chk_autostart = QCheckBox(tr("开机自动启动（托盘常驻，不弹窗）"))
         try:
             from .autostart import is_enabled as _as_enabled, is_supported as _as_supported
         except ImportError:
@@ -444,23 +455,25 @@ class SettingsWindow(QMainWindow):
             self.chk_autostart.setChecked(_as_enabled())
         else:
             self.chk_autostart.setEnabled(False)
-            self.chk_autostart.setToolTip("仅打包版（exe）支持开机自启")
+            self.chk_autostart.setToolTip(tr("仅打包版（exe）支持开机自启"))
         uf.addRow(self.chk_autostart)
         v.addWidget(ui_box)
 
-        about = QGroupBox("关于")
+        about = QGroupBox(tr("关于"))
         af = QFormLayout(about)
-        af.addRow("当前版本", QLabel(f"v{__version__}"))
+        af.addRow(tr("当前版本"), QLabel(f"v{__version__}"))
         author = QLabel(
-            '作者：<a href="https://github.com/Twilight719">Twilight719</a>'
-            '　·　开源地址：<a href="https://github.com/Twilight719/realtime-translate-subtitles">GitHub</a>'
-            '　·　MIT 协议'
+            tr(
+                '作者：<a href="https://github.com/Twilight719">Twilight719</a>'
+                '　·　开源地址：<a href="https://github.com/Twilight719/realtime-translate-subtitles">GitHub</a>'
+                '　·　MIT 协议'
+            )
         )
         author.setObjectName("hint")
         author.setOpenExternalLinks(True)
-        af.addRow("创作者", author)
+        af.addRow(tr("创作者"), author)
         update_row = QHBoxLayout()
-        self.btn_update = QPushButton("检查更新")
+        self.btn_update = QPushButton(tr("检查更新"))
         self.btn_update.clicked.connect(self._on_check_update)
         self.update_result = QLabel("")
         self.update_result.setObjectName("hint")
@@ -470,7 +483,7 @@ class SettingsWindow(QMainWindow):
         af.addRow(update_row)
         v.addWidget(about)
 
-        hint = QLabel("提示：托盘图标双击可快速启停；关闭本窗口不会退出程序（托盘常驻）。")
+        hint = QLabel(tr("提示：托盘图标双击可快速启停；关闭本窗口不会退出程序（托盘常驻）。"))
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         v.addWidget(hint)
@@ -483,16 +496,16 @@ class SettingsWindow(QMainWindow):
         current = self.combo_audio.currentData() if self.combo_audio.count() else None
         self.combo_audio.blockSignals(True)
         self.combo_audio.clear()
-        self.combo_audio.addItem("默认扬声器（系统声音，跟随系统默认输出）", ("loopback", None))
+        self.combo_audio.addItem(tr("默认扬声器（系统声音，跟随系统默认输出）"), ("loopback", None))
         try:
             try:
                 from .audio_capture import list_input_devices, list_loopback_devices
             except ImportError:
                 from app.audio_capture import list_input_devices, list_loopback_devices
             for d in list_loopback_devices():
-                self.combo_audio.addItem(f"扬声器：{d.name}", ("loopback", d.name))
+                self.combo_audio.addItem(tr("扬声器：{name}").format(name=d.name), ("loopback", d.name))
             for d in list_input_devices():
-                self.combo_audio.addItem(f"麦克风：{d.name}", ("mic", d.name))
+                self.combo_audio.addItem(tr("麦克风：{name}").format(name=d.name), ("mic", d.name))
         except Exception:
             pass
         audio_cfg = self.cfg.get("audio") or {}
@@ -500,7 +513,7 @@ class SettingsWindow(QMainWindow):
         idx = self.combo_audio.findData(target)
         if idx < 0 and target and target[1]:
             # 配置里的设备当前没插：保留显示以免丢配置
-            label = ("麦克风：" if target[0] == "mic" else "扬声器：") + target[1] + "（未连接）"
+            label = (tr("麦克风：") if target[0] == "mic" else tr("扬声器：")) + target[1] + tr("（未连接）")
             self.combo_audio.addItem(label, target)
             idx = self.combo_audio.count() - 1
         self.combo_audio.setCurrentIndex(max(0, idx))
@@ -512,36 +525,36 @@ class SettingsWindow(QMainWindow):
         v = QVBoxLayout(page)
         s = self.cfg["subtitle"]
 
-        box = QGroupBox("样式")
+        box = QGroupBox(tr("样式"))
         f = QFormLayout(box)
 
         self.spin_font = SliderSpin(12, 60, s.get("font_size", 22), suffix="px")
-        f.addRow("字体大小", self.spin_font)
+        f.addRow(tr("字体大小"), self.spin_font)
 
         self.slider_alpha = SliderSpin(20, 255, s.get("bg_alpha", 140), step=5)
-        f.addRow("背景不透明度", self.slider_alpha)
+        f.addRow(tr("背景不透明度"), self.slider_alpha)
 
         self.spin_width = SliderSpin(300, 2000, s.get("width", 700), suffix="px", step=10)
-        f.addRow("字幕条宽度", self.spin_width)
+        f.addRow(tr("字幕条宽度"), self.spin_width)
 
         self.spin_fade = SliderSpin(1000, 30000, s.get("fade_ms", 5000), suffix="ms", step=500)
-        f.addRow("无语音淡出", self.spin_fade)
+        f.addRow(tr("无语音淡出"), self.spin_fade)
 
-        self.chk_through = QCheckBox("点击穿透（鼠标操作穿透字幕窗，不影响游戏）")
+        self.chk_through = QCheckBox(tr("点击穿透（鼠标操作穿透字幕窗，不影响游戏）"))
         self.chk_through.setChecked(s.get("click_through", True))
         f.addRow(self.chk_through)
 
         self.combo_display = QComboBox()
-        for code, name in [("both", "双语显示（原文 + 译文）"),
-                           ("zh", "只显示译文"),
-                           ("src", "只显示原文")]:
+        for code, name in [("both", tr("双语显示（原文 + 译文）")),
+                           ("zh", tr("只显示译文")),
+                           ("src", tr("只显示原文"))]:
             self.combo_display.addItem(name, code)
         idx = self.combo_display.findData(s.get("display_mode", "both"))
         self.combo_display.setCurrentIndex(max(0, idx))
-        f.addRow("字幕内容", self.combo_display)
+        f.addRow(tr("字幕内容"), self.combo_display)
         v.addWidget(box)
 
-        color_box = QGroupBox("颜色")
+        color_box = QGroupBox(tr("颜色"))
         cf = QFormLayout(color_box)
         self._zh_color = s.get("zh_color", "#FFE34D")
         self._src_color = s.get("src_color", "#FFFFFF")
@@ -550,17 +563,32 @@ class SettingsWindow(QMainWindow):
         self.btn_zh_color.clicked.connect(lambda: self._pick_color("zh"))
         self.btn_src_color.clicked.connect(lambda: self._pick_color("src"))
         self._refresh_color_btns()
-        cf.addRow("译文颜色", self.btn_zh_color)
-        cf.addRow("原文颜色", self.btn_src_color)
-        color_hint = QLabel("未确认中的滚动文字会自动使用同色的半透明效果。")
+        cf.addRow(tr("译文颜色"), self.btn_zh_color)
+        cf.addRow(tr("原文颜色"), self.btn_src_color)
+        color_hint = QLabel(tr("未确认中的滚动文字会自动使用同色的半透明效果。"))
         color_hint.setObjectName("hint")
         cf.addRow(color_hint)
         v.addWidget(color_box)
 
-        pos = QGroupBox("位置")
+        ocr_box = QGroupBox(tr("截图翻译弹窗"))
+        of = QFormLayout(ocr_box)
+        o = self.cfg.get("ocr") or {}
+        self.spin_ocr_duration = SliderSpin(0, 60000, o.get("duration_ms", 8000), suffix="ms", step=1000)
+        of.addRow(tr("弹窗停留时长"), self.spin_ocr_duration)
+        self.spin_ocr_font = SliderSpin(10, 40, o.get("font_size", 15), suffix="px")
+        of.addRow(tr("弹窗字号"), self.spin_ocr_font)
+        self.spin_ocr_alpha = SliderSpin(20, 255, o.get("bg_alpha", 235), step=5)
+        of.addRow(tr("弹窗背景不透明度"), self.spin_ocr_alpha)
+        ocr_hint = QLabel(tr("弹窗显示在框选区域附近；停留时长填 0 表示不自动关闭（点击弹窗关闭）。"))
+        ocr_hint.setObjectName("hint")
+        ocr_hint.setWordWrap(True)
+        of.addRow(ocr_hint)
+        v.addWidget(ocr_box)
+
+        pos = QGroupBox(tr("位置"))
         pv = QVBoxLayout(pos)
         preset_row = QHBoxLayout()
-        for label, key in [("顶部居中", "top"), ("屏幕中央", "center"), ("底部居中", "bottom")]:
+        for label, key in [(tr("顶部居中"), "top"), (tr("屏幕中央"), "center"), (tr("底部居中"), "bottom")]:
             btn = QPushButton(label)
             btn.clicked.connect(lambda _, k=key: self._apply_preset(k))
             preset_row.addWidget(btn)
@@ -579,10 +607,10 @@ class SettingsWindow(QMainWindow):
         xy_row.addStretch()
         pv.addLayout(xy_row)
         drag_row = QHBoxLayout()
-        self.btn_drag = QPushButton("手动拖动定位")
+        self.btn_drag = QPushButton(tr("手动拖动定位"))
         self.btn_drag.clicked.connect(self._on_drag_clicked)
         drag_row.addWidget(self.btn_drag)
-        drag_hint = QLabel("点击后字幕条会显示出来，用鼠标拖到想要的位置 → 点“完成定位” → “保存并应用”")
+        drag_hint = QLabel(tr("点击后字幕条会显示出来，用鼠标拖到想要的位置 → 点“完成定位” → “保存并应用”"))
         drag_hint.setObjectName("hint")
         drag_row.addWidget(drag_hint)
         drag_row.addStretch()
@@ -591,30 +619,30 @@ class SettingsWindow(QMainWindow):
         v.addWidget(pos)
 
         btn_row = QHBoxLayout()
-        btn_preview = QPushButton("预览字幕效果")
+        btn_preview = QPushButton(tr("预览字幕效果"))
         btn_preview.clicked.connect(self.request_preview.emit)
         btn_row.addWidget(btn_preview)
-        btn_restore = QPushButton("恢复默认设置")
+        btn_restore = QPushButton(tr("恢复默认设置"))
         btn_restore.setObjectName("danger")
         btn_restore.clicked.connect(self._on_restore_defaults)
         btn_row.addWidget(btn_restore)
         btn_row.addStretch()
         v.addLayout(btn_row)
 
-        hint = QLabel("外观改动会实时预览（不写入配置）；关闭本窗口时未保存的改动自动还原。点“保存并应用”后才持久生效。")
+        hint = QLabel(tr("外观改动会实时预览（不写入配置）；关闭本窗口时未保存的改动自动还原。点“保存并应用”后才持久生效。"))
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         v.addWidget(hint)
 
         v.addWidget(make_help_widget([
-            "字体大小：译文行的字号，原文行和历史行会按比例自动缩小。",
-            "背景不透明度：字幕条黑底的深浅，20 几乎全透明，255 全黑。",
-            "字幕条宽度：字幕的最大宽度，文字超出会自动换行。",
-            "无语音淡出：多久没有新字幕后自动隐藏字幕条，有声音时立即重新显示。",
-            "点击穿透：开启后鼠标可以穿过字幕条操作游戏；用“手动拖动定位”时会临时关闭。",
-            "字幕内容：双语显示 = 原文+译文两行；只显示译文适合专注看翻译；只显示原文适合练听力。",
-            "颜色：译文/原文的显示颜色，正在识别中的滚动文字自动使用同色的半透明效果。",
-            "位置：预设档位一键摆放到顶部/中央/底部，也可填坐标或手动拖动精确定位。",
+            tr("字体大小：译文行的字号，原文行和历史行会按比例自动缩小。"),
+            tr("背景不透明度：字幕条黑底的深浅，20 几乎全透明，255 全黑。"),
+            tr("字幕条宽度：字幕的最大宽度，文字超出会自动换行。"),
+            tr("无语音淡出：多久没有新字幕后自动隐藏字幕条，有声音时立即重新显示。"),
+            tr("点击穿透：开启后鼠标可以穿过字幕条操作游戏；用“手动拖动定位”时会临时关闭。"),
+            tr("字幕内容：双语显示 = 原文+译文两行；只显示译文适合专注看翻译；只显示原文适合练听力。"),
+            tr("颜色：译文/原文的显示颜色，正在识别中的滚动文字自动使用同色的半透明效果。"),
+            tr("位置：预设档位一键摆放到顶部/中央/底部，也可填坐标或手动拖动精确定位。"),
         ]))
         v.addStretch()
         self.pages.addWidget(page)
@@ -622,11 +650,11 @@ class SettingsWindow(QMainWindow):
     def _on_drag_clicked(self):
         if not self._dragging:
             self._dragging = True
-            self.btn_drag.setText("完成定位")
+            self.btn_drag.setText(tr("完成定位"))
             self.request_drag_start.emit()
         else:
             self._dragging = False
-            self.btn_drag.setText("手动拖动定位")
+            self.btn_drag.setText(tr("手动拖动定位"))
             self.request_drag_end.emit()
 
     def set_position(self, x, y):
@@ -636,7 +664,7 @@ class SettingsWindow(QMainWindow):
 
     def _pick_color(self, which):
         current = self._zh_color if which == "zh" else self._src_color
-        color = QColorDialog.getColor(QColor(current), self, "选择字幕颜色")
+        color = QColorDialog.getColor(QColor(current), self, tr("选择字幕颜色"))
         if not color.isValid():
             return
         if which == "zh":
@@ -673,8 +701,8 @@ class SettingsWindow(QMainWindow):
 
     def _on_restore_defaults(self):
         if QMessageBox.question(
-            self, "恢复默认设置",
-            "确定把字幕外观恢复为默认值吗？\n（点“保存并应用”后才会写入配置）",
+            self, tr("恢复默认设置"),
+            tr("确定把字幕外观恢复为默认值吗？\n（点“保存并应用”后才会写入配置）"),
         ) != QMessageBox.Yes:
             return
         d = self.SUBTITLE_DEFAULTS
@@ -709,58 +737,60 @@ class SettingsWindow(QMainWindow):
         v = QVBoxLayout(page)
         w = self.cfg["whisper"]
 
-        lang_box = QGroupBox("语言")
+        lang_box = QGroupBox(tr("语言"))
         lf = QFormLayout(lang_box)
         lang_cfg = self.cfg.get("language") or {}
         self.combo_src_lang = QComboBox()
-        for code, name in [("auto", "自动检测"), ("zh", "中文"), ("en", "英语"),
-                           ("ja", "日语"), ("ko", "韩语"), ("ru", "俄语")]:
+        for code, name in [("auto", tr("自动检测")), ("zh", tr("中文")), ("en", tr("英语")),
+                           ("ja", tr("日语")), ("ko", tr("韩语")), ("ru", tr("俄语"))]:
             self.combo_src_lang.addItem(name, code)
         idx = self.combo_src_lang.findData(lang_cfg.get("source", "auto"))
         self.combo_src_lang.setCurrentIndex(max(0, idx))
-        lf.addRow("源语言（听到的）", self.combo_src_lang)
+        lf.addRow(tr("源语言（听到的）"), self.combo_src_lang)
 
         self.combo_tgt_lang = QComboBox()
-        for code, name in [("zh", "中文"), ("en", "英语"), ("ja", "日语"),
-                           ("ko", "韩语"), ("ru", "俄语")]:
+        for code, name in [("zh", tr("中文")), ("en", tr("英语")), ("ja", tr("日语")),
+                           ("ko", tr("韩语")), ("ru", tr("俄语"))]:
             self.combo_tgt_lang.addItem(name, code)
         idx = self.combo_tgt_lang.findData(lang_cfg.get("target", "zh"))
         self.combo_tgt_lang.setCurrentIndex(max(0, idx))
-        lf.addRow("目标语言（翻译成）", self.combo_tgt_lang)
+        lf.addRow(tr("目标语言（翻译成）"), self.combo_tgt_lang)
 
         lang_hint = QLabel(
-            "自动检测适合视频里语言混说；看单一语言视频时锁定源语言，识别更快更准。"
-            "语言改动保存后立即生效，无需重启监听。"
+            tr(
+                "自动检测适合视频里语言混说；看单一语言视频时锁定源语言，识别更快更准。"
+                "语言改动保存后立即生效，无需重启监听。"
+            )
         )
         lang_hint.setObjectName("hint")
         lang_hint.setWordWrap(True)
         lf.addRow(lang_hint)
         v.addWidget(lang_box)
 
-        box = QGroupBox("语音识别引擎")
+        box = QGroupBox(tr("语音识别引擎"))
         f = QFormLayout(box)
 
         self.combo_engine = QComboBox()
-        self.combo_engine.addItem("faster-whisper（精准，支持约 99 种语言）", "whisper")
-        self.combo_engine.addItem("SenseVoice（极速·CPU 即可，仅 中/英/日/韩/粤）", "sensevoice")
+        self.combo_engine.addItem(tr("faster-whisper（精准，支持约 99 种语言）"), "whisper")
+        self.combo_engine.addItem(tr("SenseVoice（极速·CPU 即可，仅 中/英/日/韩/粤）"), "sensevoice")
         idx = self.combo_engine.findData(w.get("engine", "whisper"))
         self.combo_engine.setCurrentIndex(max(0, idx))
-        f.addRow("识别引擎", self.combo_engine)
+        f.addRow(tr("识别引擎"), self.combo_engine)
 
         self.combo_model = QComboBox()
         self.combo_model.addItems(["tiny", "base", "small", "medium", "large-v3-turbo"])
         self.combo_model.setCurrentText(w.get("model_size", "small"))
-        f.addRow("模型档位", self.combo_model)
+        f.addRow(tr("模型档位"), self.combo_model)
 
         self.combo_device = QComboBox()
         self.combo_device.addItems(["cuda", "cpu"])
         self.combo_device.setCurrentText(w.get("device", "cuda"))
-        f.addRow("运行设备", self.combo_device)
+        f.addRow(tr("运行设备"), self.combo_device)
 
         self.combo_compute = QComboBox()
         self.combo_compute.addItems(["float16", "int8_float16", "int8"])
         self.combo_compute.setCurrentText(w.get("compute_type", "float16"))
-        f.addRow("计算精度", self.combo_compute)
+        f.addRow(tr("计算精度"), self.combo_compute)
 
         self.spin_beam = QSpinBox()
         self.spin_beam.setRange(1, 5)
@@ -768,30 +798,38 @@ class SettingsWindow(QMainWindow):
         f.addRow("Beam size", self.spin_beam)
 
         self.edit_prompt = QLineEdit(w.get("prompt") or "")
-        self.edit_prompt.setPlaceholderText("可选：作品名 / 角色名 / 术语，如：原神 派蒙 元素爆发")
-        f.addRow("识别提示词", self.edit_prompt)
+        self.edit_prompt.setPlaceholderText(tr("可选：作品名 / 角色名 / 术语，如：原神 派蒙 元素爆发"))
+        f.addRow(tr("识别提示词"), self.edit_prompt)
         v.addWidget(box)
 
-        hint = QLabel("识别参数改动后自动重启监听生效（需重新加载模型，等待几秒）。")
+        hint = QLabel(tr("识别参数改动后自动重启监听生效（需重新加载模型，等待几秒）。"))
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         v.addWidget(hint)
 
         v.addWidget(make_help_widget([
-            "识别引擎：faster-whisper 精准、语言多（可选 large-v3-turbo）；SenseVoice 专为中日韩语优化，"
-            "CPU 上约 30 倍实时速度、加载仅 1 秒、不抢显卡，看日/英视频强烈推荐。选 SenseVoice 时"
-            "下面的模型档位/设备/精度/提示词不生效。",
-            "源语言：听到的语言。自动检测适合视频里多国语言混说；看单一语言视频时锁定，识别更快更准。"
-            "注意 SenseVoice 只支持 中/英/日/韩/粤，锁定其他语言会自动改回自动检测。",
-            "目标语言：字幕翻译成的语言。改动保存后立即生效，无需重启。",
-            "模型档位：tiny/base 最快但错字多；small 均衡；large-v3-turbo 最准，专为实时设计，"
-            "显卡上速度和 small 相当（首次需下载约 1.6GB，显存多占约 1GB），追求准确度推荐它。",
-            "运行设备：cuda = 用显卡识别（快）；cpu = 用处理器（慢 3~5 倍），显卡被占满时才考虑。",
-            "计算精度：cuda 选 float16 或 int8_float16（更快、显存更省，质量几乎无损）；cpu 选 int8。",
-            "Beam size：识别时每步比较的候选数量。1 最快（实时字幕推荐）；3~5 略准但明显变慢。",
-            "识别提示词：告诉模型当前内容的背景词汇（作品名/角色名/术语），专有名词识别明显更准；"
-            "改动立即生效，不会重载模型。",
-            "识别为单遍模式：嘈杂音频（BGM/音效）不会反复重试，避免延迟累积。",
+            tr(
+                "识别引擎：faster-whisper 精准、语言多（可选 large-v3-turbo）；SenseVoice 专为中日韩语优化，"
+                "CPU 上约 30 倍实时速度、加载仅 1 秒、不抢显卡，看日/英视频强烈推荐。选 SenseVoice 时"
+                "下面的模型档位/设备/精度/提示词不生效。"
+            ),
+            tr(
+                "源语言：听到的语言。自动检测适合视频里多国语言混说；看单一语言视频时锁定，识别更快更准。"
+                "注意 SenseVoice 只支持 中/英/日/韩/粤，锁定其他语言会自动改回自动检测。"
+            ),
+            tr("目标语言：字幕翻译成的语言。改动保存后立即生效，无需重启。"),
+            tr(
+                "模型档位：tiny/base 最快但错字多；small 均衡；large-v3-turbo 最准，专为实时设计，"
+                "显卡上速度和 small 相当（首次需下载约 1.6GB，显存多占约 1GB），追求准确度推荐它。"
+            ),
+            tr("运行设备：cuda = 用显卡识别（快）；cpu = 用处理器（慢 3~5 倍），显卡被占满时才考虑。"),
+            tr("计算精度：cuda 选 float16 或 int8_float16（更快、显存更省，质量几乎无损）；cpu 选 int8。"),
+            tr("Beam size：识别时每步比较的候选数量。1 最快（实时字幕推荐）；3~5 略准但明显变慢。"),
+            tr(
+                "识别提示词：告诉模型当前内容的背景词汇（作品名/角色名/术语），专有名词识别明显更准；"
+                "改动立即生效，不会重载模型。"
+            ),
+            tr("识别为单遍模式：嘈杂音频（BGM/音效）不会反复重试，避免延迟累积。"),
         ]))
         v.addStretch()
         self.pages.addWidget(page)
@@ -802,7 +840,7 @@ class SettingsWindow(QMainWindow):
         v = QVBoxLayout(page)
         t = self.cfg["translator"]
 
-        box = QGroupBox("后端优先级（勾选启用，自上而下依次尝试）")
+        box = QGroupBox(tr("后端优先级（勾选启用，自上而下依次尝试）"))
         bl = QHBoxLayout(box)
         self.order_list = QListWidget()
         self.order_list.setObjectName("orderList")
@@ -813,9 +851,9 @@ class SettingsWindow(QMainWindow):
                 self._add_backend_item(name, False)
         bl.addWidget(self.order_list)
         btns = QVBoxLayout()
-        btn_up = QPushButton("上移")
+        btn_up = QPushButton(tr("上移"))
         btn_up.clicked.connect(lambda: self._move_item(-1))
-        btn_down = QPushButton("下移")
+        btn_down = QPushButton(tr("下移"))
         btn_down.clicked.connect(lambda: self._move_item(1))
         btns.addWidget(btn_up)
         btns.addWidget(btn_down)
@@ -827,10 +865,10 @@ class SettingsWindow(QMainWindow):
         self.combo_nllb = QComboBox()
         self.combo_nllb.addItems(["cpu", "cuda"])
         self.combo_nllb.setCurrentText(t.get("nllb_device", "cpu"))
-        nllb_row.addRow("NLLB 运行设备", self.combo_nllb)
+        nllb_row.addRow(tr("NLLB 运行设备"), self.combo_nllb)
         v.addLayout(nllb_row)
 
-        llm = QGroupBox("大模型 API（选择“大模型 API”后端时生效）")
+        llm = QGroupBox(tr("大模型 API（选择“大模型 API”后端时生效）"))
         lf = QFormLayout(llm)
         cfg_llm = t.get("llm_api", {})
         self.edit_base_url = QLineEdit(cfg_llm.get("base_url", ""))
@@ -842,24 +880,24 @@ class SettingsWindow(QMainWindow):
         self.edit_model.setPlaceholderText("deepseek-flash")
         lf.addRow("Base URL", self.edit_base_url)
         lf.addRow("API Key", self.edit_api_key)
-        lf.addRow("模型名", self.edit_model)
-        self.chk_stream = QCheckBox("流式输出（译文逐字上屏，不用等整句翻完，观感更实时）")
+        lf.addRow(tr("模型名"), self.edit_model)
+        self.chk_stream = QCheckBox(tr("流式输出（译文逐字上屏，不用等整句翻完，观感更实时）"))
         self.chk_stream.setChecked(cfg_llm.get("stream", True))
         lf.addRow(self.chk_stream)
         v.addWidget(llm)
 
         v.addWidget(make_help_widget([
-            "后端优先级：排最上面的先用，失败或限流时自动切换到下一个，全部失败会稍后自动恢复重试。",
-            "有道翻译：免 key、国内直连，速度快，但只支持“外语 ↔ 中文”。",
-            "大模型 API：DeepSeek 等，口语和游戏术语翻译质量最好，需要填 API Key（按量计费）。",
-            "MyMemory / Google：免费备用；Google 需要能访问它的网络。",
-            "NLLB 本地模型：离线兜底，断网也能翻，质量一般、速度较慢。",
-            "NLLB 运行设备：cpu 不占显存（推荐，把显存留给识别和游戏）；cuda 更快但多占约 1GB 显存。",
-            "Base URL / API Key / 模型名：选择“大模型 API”后端时生效，DeepSeek 官方地址为 https://api.deepseek.com/v1。",
-            "流式输出：开启后译文逐字上屏（像打字一样），不用等整句翻完；关闭则等整句翻完一次性显示。仅对“大模型 API”后端生效。",
+            tr("后端优先级：排最上面的先用，失败或限流时自动切换到下一个，全部失败会稍后自动恢复重试。"),
+            tr("有道翻译：免 key、国内直连，速度快，但只支持“外语 ↔ 中文”。"),
+            tr("大模型 API：DeepSeek 等，口语和游戏术语翻译质量最好，需要填 API Key（按量计费）。"),
+            tr("MyMemory / Google：免费备用；Google 需要能访问它的网络。"),
+            tr("NLLB 本地模型：离线兜底，断网也能翻，质量一般、速度较慢。"),
+            tr("NLLB 运行设备：cpu 不占显存（推荐，把显存留给识别和游戏）；cuda 更快但多占约 1GB 显存。"),
+            tr("Base URL / API Key / 模型名：选择“大模型 API”后端时生效，DeepSeek 官方地址为 https://api.deepseek.com/v1。"),
+            tr("流式输出：开启后译文逐字上屏（像打字一样），不用等整句翻完；关闭则等整句翻完一次性显示。仅对“大模型 API”后端生效。"),
         ]))
 
-        hint = QLabel("API Key 以明文保存在本地 config.yaml 中。翻译后端改动立即重建，无需重启监听。")
+        hint = QLabel(tr("API Key 以明文保存在本地 config.yaml 中。翻译后端改动立即重建，无需重启监听。"))
         hint.setObjectName("hint")
         hint.setWordWrap(True)
         v.addWidget(hint)
@@ -895,13 +933,13 @@ class SettingsWindow(QMainWindow):
         v.addWidget(self.history_view)
 
         row = QHBoxLayout()
-        self.history_count = QLabel("0 条")
+        self.history_count = QLabel(tr("{n} 条").format(n=0))
         self.history_count.setObjectName("hint")
-        btn_refresh = QPushButton("刷新")
+        btn_refresh = QPushButton(tr("刷新"))
         btn_refresh.clicked.connect(lambda: self.refresh_history(force=True))
-        btn_export = QPushButton("导出为 TXT")
+        btn_export = QPushButton(tr("导出为 TXT"))
         btn_export.clicked.connect(self._export_history)
-        btn_clear = QPushButton("清空记录")
+        btn_clear = QPushButton(tr("清空记录"))
         btn_clear.setObjectName("danger")
         btn_clear.clicked.connect(self._clear_history)
         row.addWidget(self.history_count)
@@ -911,7 +949,7 @@ class SettingsWindow(QMainWindow):
         row.addWidget(btn_clear)
         v.addLayout(row)
 
-        hint = QLabel("记录本次会话所有定稿字幕（最多保留 5000 条，退出程序后清空）。")
+        hint = QLabel(tr("记录本次会话所有定稿字幕（最多保留 5000 条，退出程序后清空）。"))
         hint.setObjectName("hint")
         v.addWidget(hint)
         self.pages.addWidget(page)
@@ -931,31 +969,31 @@ class SettingsWindow(QMainWindow):
             else:
                 lines.append(f"[{it['time']}] {zh or src}")
         self.history_view.setPlainText("\n".join(lines))
-        self.history_count.setText(f"{len(items)} 条")
+        self.history_count.setText(tr("{n} 条").format(n=len(items)))
         bar = self.history_view.verticalScrollBar()
         bar.setValue(bar.maximum())
 
     def _export_history(self):
         items = self._history_provider() if self._history_provider else []
         if not items:
-            QMessageBox.information(self, "导出字幕记录", "当前还没有字幕记录。")
+            QMessageBox.information(self, tr("导出字幕记录"), tr("当前还没有字幕记录。"))
             return
-        default = time.strftime("字幕记录_%Y%m%d_%H%M.txt")
-        path, _ = QFileDialog.getSaveFileName(self, "导出字幕记录", default, "文本文件 (*.txt)")
+        default = time.strftime(tr("字幕记录_%Y%m%d_%H%M.txt"))
+        path, _ = QFileDialog.getSaveFileName(self, tr("导出字幕记录"), default, tr("文本文件 (*.txt)"))
         if not path:
             return
         with open(path, "w", encoding="utf-8") as f:
-            f.write("实时翻译字幕 · 会话记录\n")
-            f.write(time.strftime("导出时间：%Y-%m-%d %H:%M:%S") + "\n\n")
+            f.write(tr("实时翻译字幕 · 会话记录\n"))
+            f.write(time.strftime(tr("导出时间：%Y-%m-%d %H:%M:%S")) + "\n\n")
             for it in items:
                 f.write(f"[{it['time']}] {(it.get('src') or '').strip()}\n")
                 zh = (it.get("zh") or "").strip()
                 if zh:
                     f.write(f"            {zh}\n")
-        QMessageBox.information(self, "导出完成", f"已导出 {len(items)} 条到：\n{path}")
+        QMessageBox.information(self, tr("导出完成"), tr("已导出 {n} 条到：\n{path}").format(n=len(items), path=path))
 
     def _clear_history(self):
-        if QMessageBox.question(self, "清空记录", "确定清空本次会话的字幕记录吗？") != QMessageBox.Yes:
+        if QMessageBox.question(self, tr("清空记录"), tr("确定清空本次会话的字幕记录吗？")) != QMessageBox.Yes:
             return
         self.request_clear_history.emit()
         self.refresh_history(force=True)
@@ -971,17 +1009,17 @@ class SettingsWindow(QMainWindow):
         v.addWidget(self.log_view)
 
         row = QHBoxLayout()
-        self.chk_autolog = QCheckBox("自动刷新")
+        self.chk_autolog = QCheckBox(tr("自动刷新"))
         self.chk_autolog.setChecked(True)
         self.chk_autolog.toggled.connect(
             lambda on: self._log_timer.start() if on else self._log_timer.stop()
         )
-        btn_refresh = QPushButton("刷新")
+        btn_refresh = QPushButton(tr("刷新"))
         btn_refresh.clicked.connect(self._refresh_log)
-        btn_clear = QPushButton("清空日志")
+        btn_clear = QPushButton(tr("清空日志"))
         btn_clear.setObjectName("danger")
         btn_clear.clicked.connect(self._clear_log)
-        btn_open = QPushButton("打开所在目录")
+        btn_open = QPushButton(tr("打开所在目录"))
         btn_open.clicked.connect(lambda: subprocess.Popen(["explorer", base_dir()]))
         row.addWidget(self.chk_autolog)
         row.addStretch()
@@ -995,12 +1033,12 @@ class SettingsWindow(QMainWindow):
     def set_running(self, running):
         if running:
             self.status_dot.setStyleSheet("color: #4CAF50;")
-            self.status_label.setText("运行中")
-            self.btn_toggle.setText("停止监听")
+            self.status_label.setText(tr("运行中"))
+            self.btn_toggle.setText(tr("停止监听"))
         else:
             self.status_dot.setStyleSheet("color: #888888;")
-            self.status_label.setText("已停止")
-            self.btn_toggle.setText("开始监听")
+            self.status_label.setText(tr("已停止"))
+            self.btn_toggle.setText(tr("开始监听"))
 
     def set_subtitle_count(self, n):
         self.stat_count.setText(str(n))
@@ -1013,7 +1051,7 @@ class SettingsWindow(QMainWindow):
     # ---------- 检查更新 ----------
     def _on_check_update(self):
         self.btn_update.setEnabled(False)
-        self.update_result.setText("正在检查…")
+        self.update_result.setText(tr("正在检查…"))
         self.request_check_update.emit()
 
     def show_update_result(self, result, popup=True):
@@ -1022,23 +1060,29 @@ class SettingsWindow(QMainWindow):
 
         self.btn_update.setEnabled(True)
         if result.get("error"):
-            self.update_result.setText(f"检查失败：{result['error']}")
+            self.update_result.setText(tr("检查失败：{err}").format(err=result["error"]))
             return
         if result.get("has_update"):
             self._latest_update = result
-            self.update_result.setText(f"发现新版本 {result['latest']}（当前 v{__version__}），点“检查更新”可下载")
+            self.update_result.setText(
+                tr("发现新版本 {latest}（当前 v{ver}），点“检查更新”可下载").format(
+                    latest=result["latest"], ver=__version__
+                )
+            )
             if not popup:
                 return
             box = QMessageBox(self)
-            box.setWindowTitle("发现新版本")
+            box.setWindowTitle(tr("发现新版本"))
             box.setText(
-                f"最新版本 {result['latest']} 已发布（当前 v{__version__}）。\n\n"
-                "“软件内下载”会优先走国内加速镜像，全部失败才用 GitHub 直连；\n"
-                "下载完成后自动替换旧文件并重启（你的配置和已下载模型都会保留）。"
+                tr(
+                    "最新版本 {latest} 已发布（当前 v{ver}）。\n\n"
+                    "“软件内下载”会优先走国内加速镜像，全部失败才用 GitHub 直连；\n"
+                    "下载完成后自动替换旧文件并重启（你的配置和已下载模型都会保留）。"
+                ).format(latest=result["latest"], ver=__version__)
             )
-            btn_dl = box.addButton("软件内下载更新（推荐）", QMessageBox.AcceptRole)
-            btn_web = box.addButton("打开下载页面", QMessageBox.ActionRole)
-            box.addButton("取消", QMessageBox.RejectRole)
+            btn_dl = box.addButton(tr("软件内下载更新（推荐）"), QMessageBox.AcceptRole)
+            btn_web = box.addButton(tr("打开下载页面"), QMessageBox.ActionRole)
+            box.addButton(tr("取消"), QMessageBox.RejectRole)
             box.exec_()
             clicked = box.clickedButton()
             if clicked is btn_dl:
@@ -1047,7 +1091,7 @@ class SettingsWindow(QMainWindow):
                 webbrowser.open(result["url"])
         else:
             self._latest_update = None
-            self.update_result.setText(f"已是最新版本（v{__version__}）")
+            self.update_result.setText(tr("已是最新版本（v{ver}）").format(ver=__version__))
 
     # ---------- 软件内下载更新 ----------
     def _start_download(self, result):
@@ -1065,8 +1109,8 @@ class SettingsWindow(QMainWindow):
 
         dest = os.path.join(tempfile.gettempdir(), asset["name"])
         self._dl_cancel = threading.Event()
-        self._dl_dialog = QProgressDialog("准备下载…", "取消", 0, 100, self)
-        self._dl_dialog.setWindowTitle(f"下载更新 {result['latest']}")
+        self._dl_dialog = QProgressDialog(tr("准备下载…"), tr("取消"), 0, 100, self)
+        self._dl_dialog.setWindowTitle(tr("下载更新 {latest}").format(latest=result["latest"]))
         self._dl_dialog.setWindowModality(Qt.WindowModal)
         self._dl_dialog.setMinimumDuration(0)
         self._dl_dialog.setMinimumWidth(420)
@@ -1085,33 +1129,37 @@ class SettingsWindow(QMainWindow):
         threading.Thread(target=run, daemon=True).start()
 
     def _on_dl_progress(self, done, total, idx, count):
-        channel = "GitHub 直连" if idx == count - 1 else f"镜像 {idx + 1}"
+        channel = tr("GitHub 直连") if idx == count - 1 else tr("镜像 {n}").format(n=idx + 1)
         if total:
             self._dl_dialog.setLabelText(
-                f"正在下载（{channel}，第 {idx + 1}/{count} 个通道）：\n"
-                f"{done / 1048576:.0f} / {total / 1048576:.0f} MB"
+                tr("正在下载（{channel}，第 {idx}/{count} 个通道）：\n{done:.0f} / {total:.0f} MB").format(
+                    channel=channel, idx=idx + 1, count=count,
+                    done=done / 1048576, total=total / 1048576,
+                )
             )
             self._dl_dialog.setValue(int(done * 100 / total))
         else:
-            self._dl_dialog.setLabelText(f"正在下载（{channel}）：{done / 1048576:.0f} MB")
+            self._dl_dialog.setLabelText(
+                tr("正在下载（{channel}）：{done:.0f} MB").format(channel=channel, done=done / 1048576)
+            )
 
     def _on_dl_finished(self, ok, info, dest):
         self._dl_dialog.close()
         if not ok:
             if info != "已取消":
                 QMessageBox.warning(
-                    self, "下载失败",
-                    f"{info}\n\n可以点“检查更新 → 打开下载页面”用浏览器手动下载。",
+                    self, tr("下载失败"),
+                    tr("{info}\n\n可以点“检查更新 → 打开下载页面”用浏览器手动下载。").format(info=info),
                 )
             return
         try:
             app_dir = self._extract_update(dest)
         except Exception as e:
-            QMessageBox.warning(self, "解压失败", f"{e}\n\n可以用浏览器手动下载后覆盖安装。")
+            QMessageBox.warning(self, tr("解压失败"), tr("{e}\n\n可以用浏览器手动下载后覆盖安装。").format(e=e))
             return
         if QMessageBox.question(
-            self, "下载完成",
-            "更新包已就绪，立即重启完成更新吗？\n（当前配置和已下载的模型都会保留）",
+            self, tr("下载完成"),
+            tr("更新包已就绪，立即重启完成更新吗？\n（当前配置和已下载的模型都会保留）"),
         ) == QMessageBox.Yes:
             self.request_install_update.emit(app_dir)
 
@@ -1128,15 +1176,15 @@ class SettingsWindow(QMainWindow):
                    if len(entries) == 1 and os.path.isdir(os.path.join(staging_root, entries[0]))
                    else staging_root)
         if not any(f.lower().endswith(".exe") for f in os.listdir(app_dir)):
-            raise RuntimeError("更新包结构异常：找不到程序文件")
+            raise RuntimeError(tr("更新包结构异常：找不到程序文件"))
         return app_dir
 
     def refresh_info(self, device_name=""):
         self.info_hotkey.setText(self.cfg.get("hotkey", "alt+t"))
-        self.info_device.setText(device_name or "默认扬声器 (loopback)")
+        self.info_device.setText(device_name or tr("默认扬声器 (loopback)"))
         w = self.cfg["whisper"]
         if w.get("engine", "whisper") == "sensevoice":
-            self.info_model.setText("SenseVoice 极速 / cpu")
+            self.info_model.setText(tr("SenseVoice 极速 / cpu"))
         else:
             self.info_model.setText(f"{w.get('model_size')} / {w.get('device')}")
         order = self.cfg["translator"].get("order", [])
@@ -1169,7 +1217,7 @@ class SettingsWindow(QMainWindow):
     def _refresh_log(self):
         path = os.path.join(base_dir(), "app.log")
         if not os.path.exists(path):
-            self.log_view.setPlainText("（暂无日志）")
+            self.log_view.setPlainText(tr("（暂无日志）"))
             return
         with open(path, encoding="utf-8", errors="replace") as f:
             f.seek(0, os.SEEK_END)
@@ -1188,7 +1236,7 @@ class SettingsWindow(QMainWindow):
             bar.setValue(saved_pos)
 
     def _clear_log(self):
-        if QMessageBox.question(self, "清空日志", "确定清空 app.log 吗？") != QMessageBox.Yes:
+        if QMessageBox.question(self, tr("清空日志"), tr("确定清空 app.log 吗？")) != QMessageBox.Yes:
             return
         # 通过日志 handler 安全清空：先关闭流再截断重开，避免写入位置错乱
         import logging
@@ -1212,8 +1260,10 @@ class SettingsWindow(QMainWindow):
             cfg["hotkey"] = hk
         except ValueError as e:
             QMessageBox.warning(
-                self, "热键无效",
-                f"热键“{hk}”无法识别（{e}），本次保留原热键 {cfg.get('hotkey', DEFAULT_HOTKEY)}。",
+                self, tr("热键无效"),
+                tr("热键“{hk}”无法识别（{err}），本次保留原热键 {old}。").format(
+                    hk=hk, err=e, old=cfg.get("hotkey", DEFAULT_HOTKEY)
+                ),
             )
             self.btn_hotkey.setText(cfg.get("hotkey", DEFAULT_HOTKEY))
         hk_ocr = self.btn_hotkey_ocr.hotkey()
@@ -1222,8 +1272,10 @@ class SettingsWindow(QMainWindow):
             cfg["hotkey_ocr"] = hk_ocr
         except ValueError as e:
             QMessageBox.warning(
-                self, "热键无效",
-                f"热键“{hk_ocr}”无法识别（{e}），本次保留原热键 {cfg.get('hotkey_ocr', DEFAULT_HOTKEY_OCR)}。",
+                self, tr("热键无效"),
+                tr("热键“{hk}”无法识别（{err}），本次保留原热键 {old}。").format(
+                    hk=hk_ocr, err=e, old=cfg.get("hotkey_ocr", DEFAULT_HOTKEY_OCR)
+                ),
             )
             self.btn_hotkey_ocr.setText(cfg.get("hotkey_ocr", DEFAULT_HOTKEY_OCR))
 
@@ -1249,6 +1301,14 @@ class SettingsWindow(QMainWindow):
         if ui is None:
             cfg["ui"] = ui = {}
         ui["font_size"] = self.spin_ui_font.value()
+        ui["language"] = self.combo_ui_lang.currentData()
+
+        ocr = cfg.get("ocr")
+        if ocr is None:
+            cfg["ocr"] = ocr = {}
+        ocr["duration_ms"] = self.spin_ocr_duration.value()
+        ocr["font_size"] = self.spin_ocr_font.value()
+        ocr["bg_alpha"] = self.spin_ocr_alpha.value()
 
         audio = cfg.get("audio")
         if audio is None:

@@ -11,7 +11,7 @@ A Windows desktop tool for real-time translated subtitles: it listens to your PC
 - **Automatic language detection**: Whisper recognizes ~99 languages; you can also lock the source language (zh/en/ja/ko/ru) for better speed and accuracy. An optional SenseVoice engine offers ~30x real-time recognition on CPU for zh/en/ja/ko/yue
 - **Multiple translation backends**: Youdao / LLM APIs (DeepSeek etc.) / MyMemory / Google / offline NLLB fallback, tried in priority order with automatic failover
 - **Headphone hot-swap**: follows the default output device automatically when you plug/unplug headphones
-- **GUI settings**: subtitle style (font/color/opacity/width/position), languages, models, translation backends, log viewer — each option has a built-in explanation
+- **GUI settings**: subtitle style (font/color/opacity/width/position), screenshot popup, languages, models, translation backends, log viewer — each option has a built-in explanation; UI available in Chinese and English
 - **Global hotkey** (Alt+T by default, customizable to any Ctrl/Alt/Shift combo in Settings), system tray
 - **Screenshot translation**: press Ctrl+Alt+R and drag-select any screen region → built-in Windows OCR → translation popup — made for manga and image text (Japanese requires the Windows Japanese language pack)
 - **Auto-update**: silent update check on startup with a tray notification; in-app download (China-friendly GitHub mirrors first, GitHub direct as fallback), then automatic file replacement and restart — your config and downloaded models are preserved
