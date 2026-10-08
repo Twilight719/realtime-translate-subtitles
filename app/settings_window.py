@@ -723,8 +723,15 @@ class SettingsWindow(QMainWindow):
         lf.addRow(lang_hint)
         v.addWidget(lang_box)
 
-        box = QGroupBox("faster-whisper 语音识别")
+        box = QGroupBox("语音识别引擎")
         f = QFormLayout(box)
+
+        self.combo_engine = QComboBox()
+        self.combo_engine.addItem("faster-whisper（精准，支持约 99 种语言）", "whisper")
+        self.combo_engine.addItem("SenseVoice（极速·CPU 即可，仅 中/英/日/韩/粤）", "sensevoice")
+        idx = self.combo_engine.findData(w.get("engine", "whisper"))
+        self.combo_engine.setCurrentIndex(max(0, idx))
+        f.addRow("识别引擎", self.combo_engine)
 
         self.combo_model = QComboBox()
         self.combo_model.addItems(["tiny", "base", "small", "medium", "large-v3-turbo"])
@@ -757,7 +764,11 @@ class SettingsWindow(QMainWindow):
         v.addWidget(hint)
 
         v.addWidget(make_help_widget([
-            "源语言：听到的语言。自动检测适合视频里多国语言混说；看单一语言视频时锁定，识别更快更准。",
+            "识别引擎：faster-whisper 精准、语言多（可选 large-v3-turbo）；SenseVoice 专为中日韩语优化，"
+            "CPU 上约 30 倍实时速度、加载仅 1 秒、不抢显卡，看日/英视频强烈推荐。选 SenseVoice 时"
+            "下面的模型档位/设备/精度/提示词不生效。",
+            "源语言：听到的语言。自动检测适合视频里多国语言混说；看单一语言视频时锁定，识别更快更准。"
+            "注意 SenseVoice 只支持 中/英/日/韩/粤，锁定其他语言会自动改回自动检测。",
             "目标语言：字幕翻译成的语言。改动保存后立即生效，无需重启。",
             "模型档位：tiny/base 最快但错字多；small 均衡；large-v3-turbo 最准，专为实时设计，"
             "显卡上速度和 small 相当（首次需下载约 1.6GB，显存多占约 1GB），追求准确度推荐它。",
@@ -1110,7 +1121,10 @@ class SettingsWindow(QMainWindow):
         self.info_hotkey.setText(self.cfg.get("hotkey", "alt+t"))
         self.info_device.setText(device_name or "默认扬声器 (loopback)")
         w = self.cfg["whisper"]
-        self.info_model.setText(f"{w.get('model_size')} / {w.get('device')}")
+        if w.get("engine", "whisper") == "sensevoice":
+            self.info_model.setText("SenseVoice 极速 / cpu")
+        else:
+            self.info_model.setText(f"{w.get('model_size')} / {w.get('device')}")
         order = self.cfg["translator"].get("order", [])
         names = [BACKENDS.get(n, (n, ""))[0].split("（")[0] for n in order]
         self.info_backend.setText(" → ".join(names))
@@ -1226,6 +1240,7 @@ class SettingsWindow(QMainWindow):
             app_cfg["autostart"] = self.chk_autostart.isChecked()
 
         w = cfg["whisper"]
+        w["engine"] = self.combo_engine.currentData()
         w["model_size"] = self.combo_model.currentText()
         w["device"] = self.combo_device.currentText()
         w["compute_type"] = self.combo_compute.currentText()

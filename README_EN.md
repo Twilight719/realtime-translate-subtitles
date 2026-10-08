@@ -8,7 +8,7 @@ A Windows desktop tool for real-time translated subtitles: it listens to your PC
 
 - **Floating subtitle bar**: translucent, always-on-top, click-through (never blocks your game), draggable, auto-fades when silent
 - **Simultaneous-interpreter style captions**: previous sentence + current original + current translation; unconfirmed text scrolls in dim italics while confirmed text stays rock solid
-- **Automatic language detection**: Whisper recognizes ~99 languages; you can also lock the source language (zh/en/ja/ko/ru) for better speed and accuracy
+- **Automatic language detection**: Whisper recognizes ~99 languages; you can also lock the source language (zh/en/ja/ko/ru) for better speed and accuracy. An optional SenseVoice engine offers ~30x real-time recognition on CPU for zh/en/ja/ko/yue
 - **Multiple translation backends**: Youdao / LLM APIs (DeepSeek etc.) / MyMemory / Google / offline NLLB fallback, tried in priority order with automatic failover
 - **Headphone hot-swap**: follows the default output device automatically when you plug/unplug headphones
 - **GUI settings**: subtitle style (font/color/opacity/width/position), languages, models, translation backends, log viewer — each option has a built-in explanation

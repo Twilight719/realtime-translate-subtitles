@@ -6,6 +6,15 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.1.0] - 2026-10-08
+
+### 新增 / Added
+
+- **SenseVoice 极速识别引擎**：设置 → 识别模型 → 识别引擎，新增 SenseVoice 选项（阿里开源，sherpa-onnx 推理）。专为中/英/日/韩/粤优化，CPU 上约 30 倍实时速度（7 秒语音约 0.25 秒出结果），模型加载仅约 1 秒，不占用显卡——显卡可以完全留给游戏。首次使用自动下载约 230MB 模型。看日/英视频强烈推荐；识别引擎切换保存后自动重启生效。
+  New SenseVoice engine option (Settings → Recognition): optimized for zh/en/ja/ko/yue, ~30x real-time on CPU (a 7-second clip decodes in ~0.25 s), model loads in ~1 s, and uses no GPU at all. Downloads ~230 MB on first use.
+
+---
+
 ## [v1.0.12] - 2026-10-08
 
 ### 新增 / Added
@@ -215,6 +224,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.1.0]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.1.0
 [v1.0.12]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.12
 [v1.0.11]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.11
 [v1.0.10]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.10

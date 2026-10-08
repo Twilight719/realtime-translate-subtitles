@@ -108,6 +108,7 @@ audio:
   device_name:             # null = 默认设备；也可填设置页“音频来源”里列出的设备名
 
 whisper:
+  engine: whisper          # whisper = 精准（可选 large-v3-turbo）；sensevoice = 极速（CPU 即可，约 30 倍实时速度，仅支持 中/英/日/韩/粤）
   model_size: small        # tiny / base / small / medium / large-v3-turbo（最准，首次需下载约 1.6GB）
   device: cuda             # cuda / cpu
   compute_type: float16    # cuda 用 float16 或 int8_float16（更快更省显存）；cpu 建议 int8
@@ -233,12 +234,17 @@ class Pipeline:
         with self._model_lock:
             if self._transcriber is None:
                 w = self.cfg["whisper"]
-                self._transcriber = Transcriber(
-                    model_size=w["model_size"],
-                    device=w["device"],
-                    compute_type=w["compute_type"],
-                    beam_size=w.get("beam_size", 1),
-                )
+                if w.get("engine", "whisper") == "sensevoice":
+                    from app.sensevoice_engine import SenseVoiceTranscriber
+
+                    self._transcriber = SenseVoiceTranscriber()
+                else:
+                    self._transcriber = Transcriber(
+                        model_size=w["model_size"],
+                        device=w["device"],
+                        compute_type=w["compute_type"],
+                        beam_size=w.get("beam_size", 1),
+                    )
             if self._translator is None:
                 self._translator = build_chain(self.cfg["translator"])
         self._model_ready.set()
