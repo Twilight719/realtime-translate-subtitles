@@ -17,8 +17,8 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ### 修复 / Fixed
 
-- **截图翻译热键偶发失灵**：修改热键后旧的事件过滤器没有从 Qt 移除，被回收后留下悬挂指针，导致热键消息静默丢失（表现为一段时间后按热键无反应）。
-  Fixed screenshot hotkey silently dying: rebinding a hotkey left a dangling native event filter in Qt's filter chain after the old manager was garbage-collected, which eventually swallowed hotkey messages.
+- **修改热键后热键静默失灵**：同一线程用相同 id 重复注册全局热键会"替换"旧注册，而旧代码先注册新热键再停旧管理器，旧管理器的注销把刚注册的新热键一起删掉了——修改热键后功能即失效（托盘菜单仍可用）。同时修复旧事件过滤器未从 Qt 移除导致的悬挂指针隐患。
+  Fixed hotkeys silently dying after being rebound: re-registering the same hotkey id on the same thread *replaces* the old registration, but the old code registered the new hotkey before stopping the old manager — whose unregister then deleted the brand-new registration. Also removed a dangling Qt native-event-filter left behind by the old manager.
 
 ---
 

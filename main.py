@@ -804,7 +804,11 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
         self.quit()
 
     def _rebind_hotkey(self, hotkey, on_trigger, old_mgr, hotkey_id=None):
-        """运行时切换全局热键：先注册新的，成功后再注销旧的，失败则保持旧热键。"""
+        """运行时切换全局热键。必须先注销旧的再注册新的：同线程同 id 重复注册会
+        “替换”旧注册，若先注册新的再停旧的，旧的 stop() 会把刚注册的新热键一起注销，
+        导致换绑后热键静默失效（真实踩过的坑）。失败时回退恢复旧热键。"""
+        if old_mgr is not None:
+            old_mgr.stop()
         try:
             mgr = HotkeyManager(
                 app=self.app, hotkey=hotkey, on_toggle=on_trigger, hotkey_id=hotkey_id
@@ -812,9 +816,12 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
             mgr.start()
         except Exception as e:
             log.warning("新热键 %s 注册失败: %s", hotkey, e)
+            if old_mgr is not None:
+                try:
+                    old_mgr.start()
+                except Exception:
+                    log.warning("旧热键恢复失败", exc_info=True)
             return None
-        if old_mgr is not None:
-            old_mgr.stop()
         log.info("全局热键已切换: %s", hotkey)
         return mgr
 

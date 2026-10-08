@@ -61,6 +61,9 @@ class HotkeyManager:
         self._mods, self._vk = parse_hotkey(self.hotkey)
         if not user32.RegisterHotKey(None, self.hotkey_id, self._mods, self._vk):
             raise RuntimeError(f"注册全局热键失败: {self.hotkey}（可能被其他程序占用）")
+        if self._filter is not None:
+            # 重复 start（如回退恢复旧热键）前先摘掉旧过滤器，避免重复安装
+            self.app.removeNativeEventFilter(self._filter)
         self._filter = _HotkeyFilter(self.hotkey_id, self._handle)
         self.app.installNativeEventFilter(self._filter)
 
