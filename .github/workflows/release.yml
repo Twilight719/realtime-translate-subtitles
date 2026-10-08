@@ -44,6 +44,7 @@ jobs:
           ls -lh "dist/实时翻译字幕/实时翻译字幕.exe"
 
       - name: Package zip
+        if: startsWith(github.ref, 'refs/tags/')
         shell: pwsh
         run: |
           $tag = "${{ github.ref_name }}"
@@ -51,12 +52,13 @@ jobs:
           (Get-Item "realtime-translate-subtitles-$tag-windows-x64.zip").Length
 
       - name: Extract release notes from CHANGELOG
-        id: notes
+        if: startsWith(github.ref, 'refs/tags/')
         env:
           TAG: ${{ github.ref_name }}
         run: python tools/extract_notes.py "$TAG" notes.md
 
       - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
