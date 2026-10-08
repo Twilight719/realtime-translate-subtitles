@@ -134,7 +134,7 @@ translator:
   llm_api:
     base_url: https://api.deepseek.com/v1
     api_key: ""             # 填 key 后在 order 里加 llm_api 即启用
-    model: deepseek-chat
+    model: deepseek-flash   # DeepSeek 最新 V4.1 Flash；旧名 deepseek-chat 已被路由到此
     context_size: 1
     stream: true            # true=译文逐字上屏（更实时）；false=整句翻完一次性显示
 

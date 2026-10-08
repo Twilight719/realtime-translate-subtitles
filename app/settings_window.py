@@ -757,7 +757,7 @@ class SettingsWindow(QMainWindow):
         self.edit_api_key.setEchoMode(QLineEdit.Password)
         self.edit_api_key.setPlaceholderText("sk-...")
         self.edit_model = QLineEdit(cfg_llm.get("model", ""))
-        self.edit_model.setPlaceholderText("deepseek-chat")
+        self.edit_model.setPlaceholderText("deepseek-flash")
         lf.addRow("Base URL", self.edit_base_url)
         lf.addRow("API Key", self.edit_api_key)
         lf.addRow("模型名", self.edit_model)

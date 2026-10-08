@@ -31,7 +31,7 @@ translator:
   llm_api:
     base_url: https://api.deepseek.com/v1
     api_key: ""             # 填 key 后在 order 里加 llm_api 即启用
-    model: deepseek-chat
+    model: deepseek-flash
     context_size: 1
 
 subtitle:
