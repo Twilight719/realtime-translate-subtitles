@@ -19,9 +19,18 @@ def list_loopback_devices():
     return devices
 
 
+def list_input_devices():
+    """返回所有真实麦克风（非 loopback）。"""
+    return [m for m in sc.all_microphones(include_loopback=False) if not m.isloopback]
+
+
 def get_default_loopback():
     speaker = sc.default_speaker()
     return sc.get_microphone(speaker.id, include_loopback=True)
+
+
+def get_default_input():
+    return sc.default_microphone()
 
 
 class AudioCapture:

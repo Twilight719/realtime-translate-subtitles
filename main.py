@@ -18,6 +18,7 @@ import copy
 import queue
 import threading
 import time
+from collections import deque
 
 from ruamel.yaml import YAML
 
@@ -103,7 +104,8 @@ log = logging.getLogger("subtitle")
 DEFAULT_CONFIG = """# 实时翻译字幕配置
 
 audio:
-  device_name:             # null = 默认扬声器 loopback；也可填 audio_capture.py 自测列出的设备名
+  source: loopback         # loopback = 听系统声音（游戏/视频）；mic = 听麦克风（会议/网课）
+  device_name:             # null = 默认设备；也可填设置页“音频来源”里列出的设备名
 
 whisper:
   model_size: small        # tiny / base / small / medium / large-v3-turbo（最准，首次需下载约 1.6GB）
@@ -153,6 +155,9 @@ subtitle:
 ui:
   font_size: 13            # 设置界面字体大小（10~22），改大后窗口可手动拉大
 
+app:
+  autostart: false         # 开机自动启动（托盘常驻）
+
 hotkey: alt+t              # 全局启停快捷键（设置页可自定义，格式如 ctrl+shift+t）
 """
 
@@ -176,7 +181,17 @@ def save_config(cfg, path=CONFIG_PATH):
         yaml.dump(cfg, f)
 
 
-def pick_device(name):
+def pick_device(name, source="loopback"):
+    """按配置选音频设备。source: loopback=扬声器回环 / mic=麦克风。"""
+    from app.audio_capture import get_default_input, list_input_devices
+
+    if source == "mic":
+        if not name:
+            return get_default_input()
+        for dev in list_input_devices():
+            if name in dev.name:
+                return dev
+        raise RuntimeError(f"找不到麦克风: {name}")
     if not name:
         return get_default_loopback()
     for dev in list_loopback_devices():
@@ -240,10 +255,12 @@ class Pipeline:
                 except queue.Empty:
                     break
         threading.Thread(target=self._load_models_safe, daemon=True).start()
-        self._cap = AudioCapture(device=pick_device(self.cfg["audio"].get("device_name")))
+        audio_cfg = self.cfg.get("audio") or {}
+        source = audio_cfg.get("source", "loopback")
+        self._cap = AudioCapture(device=pick_device(audio_cfg.get("device_name"), source))
         self._cap.start()
-        # 仅在使用“默认设备”时记录扬声器 id，用于后续检测插拔耳机导致的设备切换
-        if self.cfg["audio"].get("device_name"):
+        # 仅在使用"默认扬声器 loopback"时记录扬声器 id，用于后续检测插拔耳机导致的设备切换
+        if source == "mic" or audio_cfg.get("device_name"):
             self._speaker_id = None
         else:
             import soundcard as sc
@@ -503,6 +520,8 @@ class MainApp:
             self.app.setWindowIcon(QIcon(_icon))
         self.subtitle_count = 0
         self.settings_window = None
+        # 本次会话的字幕历史（定稿句），设置页“字幕记录”可回看/导出
+        self.history = deque(maxlen=5000)
 
         self.window = SubtitleWindow(self.cfg.get("subtitle", {}))
 
@@ -589,8 +608,14 @@ class MainApp:
             self.window.update_text(payload["src"], payload["zh"])
         elif payload.get("kind") == "final":
             self.subtitle_count += 1
+            self.history.append({
+                "time": time.strftime("%H:%M:%S"),
+                "src": payload["src"],
+                "zh": payload["zh"],
+            })
             if self.settings_window is not None:
                 self.settings_window.set_subtitle_count(self.subtitle_count)
+                self.settings_window.refresh_history()
             self.window.show_final(payload["src"], payload["zh"])
         else:
             self.window.show_live(payload)
@@ -686,12 +711,20 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
                 "Live preview of the subtitle style.", "实时预览：样式改动即时生效"
             )
 
+    def get_history(self):
+        return list(self.history)
+
+    def clear_history(self):
+        self.history.clear()
+        log.info("字幕记录已清空")
+
     def open_settings(self):
         if self.settings_window is None:
             from app.settings_window import SettingsWindow
 
-            self.settings_window = SettingsWindow(self.cfg)
+            self.settings_window = SettingsWindow(self.cfg, history_provider=self.get_history)
             self.settings_window.request_toggle.connect(self.toggle)
+            self.settings_window.request_clear_history.connect(self.clear_history)
             self.settings_window.request_apply.connect(self.apply_config)
             self.settings_window.request_preview.connect(
                 lambda: self.window.update_text(
@@ -706,7 +739,10 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
             self.settings_window.set_running(self.pipeline.running)
             self.settings_window.set_subtitle_count(self.subtitle_count)
         try:
-            device_name = pick_device(self.cfg["audio"].get("device_name")).name
+            audio_cfg = self.cfg.get("audio") or {}
+            device_name = pick_device(
+                audio_cfg.get("device_name"), audio_cfg.get("source", "loopback")
+            ).name
         except Exception:
             device_name = ""
         self.settings_window.refresh_info(device_name)
@@ -735,6 +771,15 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
                 )
         reload_transcriber = _whisper_model_params(cfg.get("whisper")) != _whisper_model_params(prev.get("whisper"))
         reload_translator = cfg.get("translator", {}) != prev.get("translator", {})
+        audio_changed = cfg.get("audio", {}) != prev.get("audio", {})
+        app_cfg = cfg.get("app") or {}
+        if app_cfg.get("autostart") != (prev.get("app") or {}).get("autostart"):
+            from app.autostart import is_supported, set_enabled
+
+            if is_supported():
+                err = set_enabled(bool(app_cfg.get("autostart")))
+                if err:
+                    log.warning("开机自启动设置失败: %s", err)
         save_config(cfg)
         self.cfg = cfg
         self.window.apply_config(cfg.get("subtitle", {}))
@@ -743,6 +788,11 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
             reload_transcriber=reload_transcriber,
             reload_translator=reload_translator,
         )
+        if audio_changed and self.pipeline.running and not reload_transcriber:
+            # 音频来源切换（如 系统声音→麦克风）需要重启捕获；识别参数变化时 update_cfg 已重启过
+            self.pipeline.stop()
+            self.pipeline.start()
+            log.info("音频来源已切换，监听已自动重启")
         self._prev_cfg = copy.deepcopy(cfg)
         if self.settings_window is not None:
             self.settings_window.refresh_info()

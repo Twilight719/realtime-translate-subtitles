@@ -6,6 +6,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import zipfile
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
@@ -14,6 +15,7 @@ from PyQt5.QtWidgets import (    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
+    QFileDialog,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -264,6 +266,7 @@ class SettingsWindow(QMainWindow):
     request_live_preview = pyqtSignal(dict)  # 外观控件改动时实时预览
     request_check_update = pyqtSignal()  # “检查更新”按钮
     request_install_update = pyqtSignal(str)  # 更新包已下载解压，主程序执行替换重启
+    request_clear_history = pyqtSignal()  # 清空字幕记录
     download_progress = pyqtSignal(int, int, int, int)  # 已下载字节, 总字节, 通道序号, 通道总数
     download_finished = pyqtSignal(bool, str, str)  # 成功?, 错误描述或使用的地址, zip 路径
 
@@ -279,9 +282,10 @@ class SettingsWindow(QMainWindow):
         "src_color": "#FFFFFF",
     }
 
-    def __init__(self, cfg):
+    def __init__(self, cfg, history_provider=None):
         super().__init__()
         self.cfg = cfg
+        self._history_provider = history_provider
         self.setWindowTitle(f"实时翻译字幕 · 设置 v{__version__}")
         self.resize(760, 560)
         self._ui_font = (cfg.get("ui") or {}).get("font_size", 13)
@@ -296,7 +300,7 @@ class SettingsWindow(QMainWindow):
         self.sidebar = QListWidget()
         self.sidebar.setObjectName("sidebar")
         self.sidebar.setFixedWidth(150)
-        for name in ["主页", "字幕外观", "识别模型", "翻译服务", "日志"]:
+        for name in ["主页", "字幕外观", "识别模型", "翻译服务", "字幕记录", "日志"]:
             self.sidebar.addItem(QListWidgetItem(name))
         layout.addWidget(self.sidebar)
 
@@ -310,6 +314,7 @@ class SettingsWindow(QMainWindow):
         self._build_subtitle_page()
         self._build_whisper_page()
         self._build_translator_page()
+        self._build_history_page()
         self._build_log_page()
 
         # 字幕外观控件改动 → 实时预览（不写配置，关闭窗口未保存则自动还原）
@@ -390,6 +395,17 @@ class SettingsWindow(QMainWindow):
         hf.addRow(hk_hint)
         v.addWidget(hk_box)
 
+        audio_box = QGroupBox("音频来源")
+        adf = QFormLayout(audio_box)
+        self.combo_audio = QComboBox()
+        adf.addRow("输入设备", self.combo_audio)
+        audio_hint = QLabel("系统声音 = 游戏 / 视频 / 播放器；麦克风 = 会议、网课、语音聊天。改动“保存并应用”后自动重启监听。")
+        audio_hint.setObjectName("hint")
+        audio_hint.setWordWrap(True)
+        adf.addRow(audio_hint)
+        v.addWidget(audio_box)
+        self._refresh_audio_devices()
+
         stat = QGroupBox("统计")
         fh = QFormLayout(stat)
         self.stat_count = QLabel("0")
@@ -404,6 +420,18 @@ class SettingsWindow(QMainWindow):
         ui_hint = QLabel("拖动即可看到效果；“保存并应用”后下次打开保持。")
         ui_hint.setObjectName("hint")
         uf.addRow(ui_hint)
+        self.chk_autostart = QCheckBox("开机自动启动（托盘常驻，不弹窗）")
+        try:
+            from .autostart import is_enabled as _as_enabled, is_supported as _as_supported
+        except ImportError:
+            from app.autostart import is_enabled as _as_enabled, is_supported as _as_supported
+        self._autostart_supported = _as_supported()
+        if self._autostart_supported:
+            self.chk_autostart.setChecked(_as_enabled())
+        else:
+            self.chk_autostart.setEnabled(False)
+            self.chk_autostart.setToolTip("仅打包版（exe）支持开机自启")
+        uf.addRow(self.chk_autostart)
         v.addWidget(ui_box)
 
         about = QGroupBox("关于")
@@ -434,6 +462,35 @@ class SettingsWindow(QMainWindow):
         v.addWidget(hint)
         v.addStretch()
         self.pages.addWidget(page)
+
+    # ---------- 音频来源 ----------
+    def _refresh_audio_devices(self):
+        """刷新音频设备下拉框（耳机/麦克风插拔后重新列出），尽量保留原选择。"""
+        current = self.combo_audio.currentData() if self.combo_audio.count() else None
+        self.combo_audio.blockSignals(True)
+        self.combo_audio.clear()
+        self.combo_audio.addItem("默认扬声器（系统声音，跟随系统默认输出）", ("loopback", None))
+        try:
+            try:
+                from .audio_capture import list_input_devices, list_loopback_devices
+            except ImportError:
+                from app.audio_capture import list_input_devices, list_loopback_devices
+            for d in list_loopback_devices():
+                self.combo_audio.addItem(f"扬声器：{d.name}", ("loopback", d.name))
+            for d in list_input_devices():
+                self.combo_audio.addItem(f"麦克风：{d.name}", ("mic", d.name))
+        except Exception:
+            pass
+        audio_cfg = self.cfg.get("audio") or {}
+        target = current or (audio_cfg.get("source", "loopback"), audio_cfg.get("device_name"))
+        idx = self.combo_audio.findData(target)
+        if idx < 0 and target and target[1]:
+            # 配置里的设备当前没插：保留显示以免丢配置
+            label = ("麦克风：" if target[0] == "mic" else "扬声器：") + target[1] + "（未连接）"
+            self.combo_audio.addItem(label, target)
+            idx = self.combo_audio.count() - 1
+        self.combo_audio.setCurrentIndex(max(0, idx))
+        self.combo_audio.blockSignals(False)
 
     # ---------- 字幕外观 ----------
     def _build_subtitle_page(self):
@@ -802,6 +859,82 @@ class SettingsWindow(QMainWindow):
             self.order_list.insertItem(new_row, item)
             self.order_list.setCurrentRow(new_row)
 
+    # ---------- 字幕记录 ----------
+    def _build_history_page(self):
+        page = QWidget()
+        v = QVBoxLayout(page)
+
+        self.history_view = QPlainTextEdit()
+        self.history_view.setReadOnly(True)
+        self.history_view.setFont(QFont("Consolas", 10))
+        v.addWidget(self.history_view)
+
+        row = QHBoxLayout()
+        self.history_count = QLabel("0 条")
+        self.history_count.setObjectName("hint")
+        btn_refresh = QPushButton("刷新")
+        btn_refresh.clicked.connect(lambda: self.refresh_history(force=True))
+        btn_export = QPushButton("导出为 TXT")
+        btn_export.clicked.connect(self._export_history)
+        btn_clear = QPushButton("清空记录")
+        btn_clear.setObjectName("danger")
+        btn_clear.clicked.connect(self._clear_history)
+        row.addWidget(self.history_count)
+        row.addStretch()
+        row.addWidget(btn_refresh)
+        row.addWidget(btn_export)
+        row.addWidget(btn_clear)
+        v.addLayout(row)
+
+        hint = QLabel("记录本次会话所有定稿字幕（最多保留 5000 条，退出程序后清空）。")
+        hint.setObjectName("hint")
+        v.addWidget(hint)
+        self.pages.addWidget(page)
+
+    def refresh_history(self, force=False):
+        """刷新字幕记录视图。窗口隐藏时跳过（避免每条字幕都重建文本）。"""
+        if not hasattr(self, "history_view"):
+            return
+        if not force and not self.isVisible():
+            return
+        items = self._history_provider() if self._history_provider else []
+        lines = []
+        for it in items:
+            src, zh = (it.get("src") or "").strip(), (it.get("zh") or "").strip()
+            if src and zh:
+                lines.append(f"[{it['time']}] {src}\n            {zh}")
+            else:
+                lines.append(f"[{it['time']}] {zh or src}")
+        self.history_view.setPlainText("\n".join(lines))
+        self.history_count.setText(f"{len(items)} 条")
+        bar = self.history_view.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
+    def _export_history(self):
+        items = self._history_provider() if self._history_provider else []
+        if not items:
+            QMessageBox.information(self, "导出字幕记录", "当前还没有字幕记录。")
+            return
+        default = time.strftime("字幕记录_%Y%m%d_%H%M.txt")
+        path, _ = QFileDialog.getSaveFileName(self, "导出字幕记录", default, "文本文件 (*.txt)")
+        if not path:
+            return
+        with open(path, "w", encoding="utf-8") as f:
+            f.write("实时翻译字幕 · 会话记录\n")
+            f.write(time.strftime("导出时间：%Y-%m-%d %H:%M:%S") + "\n\n")
+            for it in items:
+                f.write(f"[{it['time']}] {(it.get('src') or '').strip()}\n")
+                zh = (it.get("zh") or "").strip()
+                if zh:
+                    f.write(f"            {zh}\n")
+        QMessageBox.information(self, "导出完成", f"已导出 {len(items)} 条到：\n{path}")
+
+    def _clear_history(self):
+        if QMessageBox.question(self, "清空记录", "确定清空本次会话的字幕记录吗？") != QMessageBox.Yes:
+            return
+        self.request_clear_history.emit()
+        self.refresh_history(force=True)
+
     # ---------- 日志 ----------
     def _build_log_page(self):
         page = QWidget()
@@ -984,6 +1117,8 @@ class SettingsWindow(QMainWindow):
 
     def showEvent(self, event):
         self.refresh_info()
+        self._refresh_audio_devices()
+        self.refresh_history(force=True)
         self._refresh_log()
         if self.chk_autolog.isChecked():
             self._log_timer.start()
@@ -1076,6 +1211,19 @@ class SettingsWindow(QMainWindow):
         if ui is None:
             cfg["ui"] = ui = {}
         ui["font_size"] = self.spin_ui_font.value()
+
+        audio = cfg.get("audio")
+        if audio is None:
+            cfg["audio"] = audio = {}
+        audio_data = self.combo_audio.currentData()
+        if audio_data:
+            audio["source"], audio["device_name"] = audio_data[0], audio_data[1]
+
+        if self._autostart_supported:
+            app_cfg = cfg.get("app")
+            if app_cfg is None:
+                cfg["app"] = app_cfg = {}
+            app_cfg["autostart"] = self.chk_autostart.isChecked()
 
         w = cfg["whisper"]
         w["model_size"] = self.combo_model.currentText()

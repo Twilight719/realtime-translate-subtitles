@@ -6,6 +6,24 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.0.12] - 2026-10-08
+
+### 新增 / Added
+
+- **麦克风输入**：设置 → 主页 → 音频来源，除了系统声音（游戏/视频）外，现在可以选麦克风，用于会议、网课、语音聊天等场景。改动保存后自动重启监听生效。
+  Microphone input: Settings → Home → audio source now lists real microphones alongside system audio, for meetings/online classes/voice chat. Applies with an automatic capture restart.
+- **开机自动启动**：设置 → 主页 → 界面 → 勾选“开机自动启动”，登录 Windows 后自动托盘常驻。
+  Optional “launch on Windows startup” toggle (tray-resident).
+- **字幕记录页**：设置 → 字幕记录，回看本次会话的所有定稿字幕（最多 5000 条），可一键导出为带时间戳的 TXT 文本。
+  New “Subtitle history” page: review all finalized subtitles of this session (up to 5000) and export them as a timestamped TXT file.
+
+### 其他 / Misc
+
+- 默认大模型名由 `deepseek-chat` 改为正式名称 `deepseek-flash`（DeepSeek V4.1 Flash；旧名官方已停用并被路由到新模型，旧配置不受影响）。
+  Default LLM model name updated to `deepseek-flash` (DeepSeek V4.1 Flash). The retired `deepseek-chat` name is routed there by DeepSeek, so existing configs keep working.
+
+---
+
 ## [v1.0.11] - 2026-09-30
 
 ### 新增 / Added
@@ -197,6 +215,7 @@ All notable changes to this project are documented here, following [Keep a Chang
 - **打包发布**：PyInstaller onedir 打包，模型不含在包内（首次运行自动下载），解压即用无需安装 Python。
   Distributed as a PyInstaller onedir build; models are not bundled (downloaded on first run). No Python installation required.
 
+[v1.0.12]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.12
 [v1.0.11]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.11
 [v1.0.10]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.10
 [v1.0.9]: https://github.com/Twilight719/realtime-translate-subtitles/releases/tag/v1.0.9
