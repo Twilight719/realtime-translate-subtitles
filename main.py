@@ -16,6 +16,7 @@ faulthandler.enable()  # 原生崩溃时打印 Python 调用栈（打包版排�
 
 import copy
 import queue
+import re
 import threading
 import time
 from collections import deque
@@ -708,6 +709,11 @@ class MainApp:
             sep = "" if src_lang in ("zh", "ja") else " "
             src = clean_cjk_spacing(sep.join(lines))
             zh = None
+            if not re.search(r"[\w぀-ヿ一-鿿]", src, re.UNICODE):
+                # 纯符号/数字/噪点，没有可翻译的文字，直接显示原文
+                log.info("OCR [%s]: %s（无有效文字，跳过翻译）", src_lang, src)
+                self.bridge.ocr_result.emit({"src": src, "zh": src, "anchor": rect})
+                return
             try:
                 zh = self.pipeline.get_translator().translate(
                     src, None if src_lang == "auto" else src_lang, target

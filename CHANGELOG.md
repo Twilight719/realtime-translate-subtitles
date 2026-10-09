@@ -6,6 +6,21 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.1] - 2026-10-09
+
+### 修复 / Fixed
+
+- **截图翻译偶发"有道返回异常 errorCode 102"**：截图翻译时已知源语言（如日语）现在会明确传给有道接口，不再依赖自动检测，大幅减少 102 报错。
+  Fixed intermittent Youdao "errorCode 102" in screenshot translation: the known source language (e.g. Japanese) is now passed explicitly instead of relying on auto-detection.
+- **单条文本翻译失败会拖累后端 60 秒**：有道等后端遇到翻不了的文本（语言不支持/内容异常）时，旧逻辑会把整个后端冷却 60 秒；现在区分"文本级错误"与"服务故障"，前者只换下一个后端重试，不再触发冷却。
+  A single untranslatable text no longer cools down a backend for 60s: text-level errors are now distinguished from service failures — the chain moves on to the next backend without penalizing the current one.
+- **截图识别到纯符号/数字时不再空调用翻译接口**：直接显示原文，避免无意义的报错日志。
+  Screenshot OCR results containing no actual words (symbols/noise only) no longer trigger a translation call; the original text is shown as-is.
+- **自动发版日志缺失**：修复 CI 发布流程中版本号变量在 PowerShell 步骤取不到值，导致 GitHub Release 页面丢失更新日志的问题；提取失败时构建将直接报错终止，不再静默发布。
+  Fixed CI release notes going missing (the version variable was empty in the PowerShell step); extraction failure now fails the build instead of silently publishing a bare release page.
+
+---
+
 ## [v1.3.0] - 2026-10-08
 
 ### 新增 / Added

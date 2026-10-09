@@ -3,7 +3,7 @@
 import logging
 import time
 
-from .base import Translator
+from .base import Translator, TranslationTextError
 from .google_web import GoogleWebTranslator
 from .llm_api import LlmApiTranslator
 from .mymemory import MyMemoryTranslator
@@ -64,6 +64,10 @@ class FallbackTranslator(Translator):
                 if on_delta is not None and getattr(backend, "supports_stream", False):
                     return backend.translate(text, src_lang, target, on_delta=on_delta)
                 return backend.translate(text, src_lang, target)
+            except TranslationTextError as e:
+                # 文本级错误：该条文本它翻不了，换下一个后端，但不计入冷却
+                log.info("翻译后端 %s 无法处理该文本: %s", backend.name, e)
+                last_err = e
             except Exception as e:
                 self._failed_at[backend] = time.time()
                 log.warning("翻译后端 %s 失败（冷却 %ds）: %s", backend.name, COOLDOWN_S, e)
