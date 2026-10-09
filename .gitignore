@@ -13,3 +13,6 @@ config.yaml
 # PyInstaller 产物
 build/
 dist/
+
+# 测试调试截图
+tools/screen_dbg.png
