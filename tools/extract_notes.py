@@ -10,8 +10,11 @@ import sys
 TAG = sys.argv[1]          # 如 v1.0.12
 OUT = sys.argv[2]          # 输出文件
 
+if not TAG:
+    sys.exit("ERROR: 未提供标签名（TAG 为空），终止发布以避免生成无版本号的说明")
+
 with open("CHANGELOG.md", encoding="utf-8") as f:
-    text = f.read()
+    text = f.read().replace("\r\n", "\n")
 
 m = re.search(
     rf"## \[{re.escape(TAG)}\].*?(?=\n---\n)",  # 从小节标题到下一个分隔线
@@ -20,7 +23,7 @@ m = re.search(
 if m:
     body = m.group(0).strip()
 else:
-    body = f"详见 [CHANGELOG.md](CHANGELOG.md) / See CHANGELOG.md for details."
+    sys.exit(f"ERROR: CHANGELOG.md 中找不到 [{TAG}] 小节，终止发布以避免生成空日志")
 
 zip_name = f"realtime-translate-subtitles-{TAG}-windows-x64.zip"
 notes = f"""## 下载 / Download
