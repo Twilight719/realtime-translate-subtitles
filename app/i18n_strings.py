@@ -371,9 +371,14 @@ MAP = {
         "New version {latest} available — click this notification to open Settings and "
         "download the update",
     "开发模式": "Development Mode",
-    "开发环境不执行自动替换。新版本文件位于：\n{path}":
-        "Auto-replace is not performed in a development environment. "
-        "New version files are located at:\n{path}",
+    "当前运行的是源码版，无法自动替换更新。\n"
+    "新版本文件已下载到：\n{path}\n\n"
+    "如果你平时用的是安装包版本，请关闭本程序后改用桌面快捷方式启动，"
+    "再执行一次「检查更新 → 软件内下载更新」。":
+        "You are running the source-code build, which cannot replace itself.\n"
+        "The new version was downloaded to:\n{path}\n\n"
+        "If you normally use the packaged build, close this app, start it from the "
+        "desktop shortcut, and run \"Check for Updates → Download Update\" again.",
     "实时预览：样式改动即时生效": "Live preview: style changes apply instantly",
     "这是字幕样式预览。": "This is a preview of the subtitle style.",
     "热键注册失败": "Hotkey Registration Failed",

@@ -6,6 +6,17 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.2] - 2026-10-09
+
+### 修复 / Fixed
+
+- **软件内更新后 Temp 目录残留数百 MB 安装包**：更新完成重启后现在会连同下载的 zip 一起清理。
+  The downloaded update zip (hundreds of MB) is now cleaned up from the Temp folder after a successful in-app update, instead of being left behind.
+- **源码版点"软件内更新"提示不明确**：更新提示现在会明确说明当前运行的是源码版、无法自动替换，并指引改用安装包版本（桌面快捷方式）完成更新。
+  The in-app update notice in the source-code build now clearly explains that it cannot replace itself and guides you to update via the packaged build (desktop shortcut) instead.
+
+---
+
 ## [v1.3.1] - 2026-10-09
 
 ### 修复 / Fixed

@@ -778,7 +778,10 @@ class MainApp:
         if not getattr(sys, "frozen", False):
             QMessageBox.information(
                 None, tr("开发模式"),
-                tr("开发环境不执行自动替换。新版本文件位于：\n{path}").format(path=new_app_dir),
+                tr("当前运行的是源码版，无法自动替换更新。\n"
+                   "新版本文件已下载到：\n{path}\n\n"
+                   "如果你平时用的是安装包版本，请关闭本程序后改用桌面快捷方式启动，"
+                   "再执行一次「检查更新 → 软件内下载更新」。").format(path=new_app_dir),
             )
             return
         import subprocess
@@ -788,6 +791,8 @@ class MainApp:
         target = os.path.dirname(sys.executable)
         exe = sys.executable
         staging_root = os.path.dirname(new_app_dir)
+        # 下载的 zip 与解压目录同名（去 _extract 加 .zip），更新完成后一并清理
+        zip_path = staging_root[:-len("_extract")] + ".zip" if staging_root.endswith("_extract") else ""
         script = f"""
 $ErrorActionPreference = "SilentlyContinue"
 while (Get-Process -Id {pid}) {{ Start-Sleep -Milliseconds 500 }}
@@ -795,6 +800,7 @@ Start-Sleep -Seconds 1
 robocopy "{new_app_dir}" "{target}" /E /IS /XF config.yaml app.log app.log.1 app.log.2 /XD models /NFL /NDL /NJH /NJS | Out-Null
 Start-Process "{exe}"
 Remove-Item -Recurse -Force "{staging_root}"
+Remove-Item -Force "{zip_path}"
 Remove-Item -Force $MyInvocation.MyCommand.Path
 """
         script_path = os.path.join(tempfile.gettempdir(), "rts_update.ps1")
