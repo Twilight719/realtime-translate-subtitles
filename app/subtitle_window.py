@@ -6,6 +6,7 @@
   译文行 —— 当前句：定稿部分稳定黄 + 未确认尾部暗黄斜体滚动
 """
 
+import os
 from html import escape
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
@@ -14,6 +15,37 @@ from PyQt5.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from .i18n import tr
 from . import i18n_strings  # noqa: F401  注册中英文映射
+
+
+def _set_native_click_through(win_id, enable):
+    """Win32 级点击穿透（WS_EX_TRANSPARENT）。
+
+    Qt 的 WA_TransparentForMouseEvents 在半透明置顶窗口上不可靠（实测 WindowFromPoint
+    仍命中字幕窗），改用系统级扩展样式，让鼠标事件在 OS 层面直接落到下方窗口（游戏）。
+    """
+    if os.name != "nt":
+        return
+    import ctypes
+    from ctypes import wintypes
+
+    GWL_EXSTYLE = -20
+    WS_EX_LAYERED = 0x00080000
+    WS_EX_TRANSPARENT = 0x00000020
+
+    user32 = ctypes.WinDLL("user32", use_last_error=True)
+    get_style = user32.GetWindowLongPtrW
+    get_style.argtypes = [wintypes.HWND, ctypes.c_int]
+    get_style.restype = ctypes.c_ssize_t
+    set_style = user32.SetWindowLongPtrW
+    set_style.argtypes = [wintypes.HWND, ctypes.c_int, ctypes.c_ssize_t]
+    set_style.restype = ctypes.c_ssize_t
+
+    hwnd = wintypes.HWND(int(win_id))
+    style = get_style(hwnd, GWL_EXSTYLE)
+    # WS_EX_TRANSPARENT 需配合 WS_EX_LAYERED 才参与命中测试
+    new = (style | WS_EX_LAYERED | WS_EX_TRANSPARENT) if enable else (style & ~WS_EX_TRANSPARENT)
+    if new != style:
+        set_style(hwnd, GWL_EXSTYLE, new)
 
 
 def _stable_tail_html(stable, tail, stable_color, tail_color):
@@ -51,8 +83,7 @@ class SubtitleWindow(QWidget):
             Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool
         )
         self.setAttribute(Qt.WA_TranslucentBackground)
-        if self.click_through:
-            self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._apply_through()
 
         self.label_history = QLabel("")
         self.label_history.setWordWrap(True)
@@ -147,6 +178,17 @@ class SubtitleWindow(QWidget):
 
     # ---------- 外观配置 ----------
 
+    def _apply_through(self):
+        """按当前 click_through 状态应用点击穿透（Qt 属性 + Win32 样式双保险）。"""
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, self.click_through)
+        if self.winId():
+            _set_native_click_through(self.winId(), self.click_through)
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        # 窗口句柄可能随 hide/show 重建，每次显示时重新应用系统级穿透样式
+        self._apply_through()
+
     def paintEvent(self, event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.Antialiasing)
@@ -171,7 +213,7 @@ class SubtitleWindow(QWidget):
         through = cfg.get("click_through", True)
         if through != self.click_through:
             self.click_through = through
-            self.setAttribute(Qt.WA_TransparentForMouseEvents, through)
+            self._apply_through()
             if self.isVisible():
                 self.hide()
                 self.show()
@@ -202,7 +244,7 @@ class SubtitleWindow(QWidget):
         """临时关闭点击穿透并显示字幕条，让用户用鼠标拖动定位。"""
         self._drag_saved_through = self.click_through
         self.click_through = False
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self._apply_through()
         self.update_text("Drag me to the position you like", tr("拖动我到想要的位置，完成后点“完成定位”"))
         self._idle_timer.stop()
         self._fade_timer.stop()
@@ -211,7 +253,7 @@ class SubtitleWindow(QWidget):
     def exit_drag_mode(self):
         """恢复点击穿透设置并隐藏，返回当前位置 (x, y)。"""
         self.click_through = getattr(self, "_drag_saved_through", self.click_through)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents, self.click_through)
+        self._apply_through()
         self.hide()
         return self.x(), self.y()
 

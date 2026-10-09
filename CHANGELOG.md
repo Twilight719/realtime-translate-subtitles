@@ -6,6 +6,15 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.3] - 2026-10-09
+
+### 修复 / Fixed
+
+- **点击穿透未真正生效**：字幕窗的"点击穿透"此前只设置了 Qt 属性，在半透明置顶窗口上会被 Windows 忽略，鼠标点击仍被字幕条拦截（游戏里点不到字幕下方的内容）。现在改用系统级窗口样式（WS_EX_TRANSPARENT），鼠标事件在系统层面直接落到字幕下方的窗口，拖动定位时临时关闭穿透不受影响。
+  Click-through now actually works: the Qt attribute alone was ignored on translucent topmost windows, so clicks were still blocked by the subtitle bar. The subtitle window now uses the native WS_EX_TRANSPARENT style so mouse events fall through to whatever is underneath (e.g. your game). Manual drag positioning still temporarily disables it as before.
+
+---
+
 ## [v1.3.2] - 2026-10-09
 
 ### 修复 / Fixed
