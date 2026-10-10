@@ -10,6 +10,8 @@ import os
 import re
 import tempfile
 
+from html import escape
+
 from PyQt5.QtCore import QPoint, QRect, Qt, pyqtSignal
 from PyQt5.QtGui import QColor, QPainter, QPen
 from PyQt5.QtWidgets import QApplication, QLabel, QWidget
@@ -144,10 +146,17 @@ class OcrResultPopup(QWidget):
             f"background: rgba(23,23,29,{bg_alpha}); color: #FFE34D; border-radius: 8px;"
             f"padding: 12px 16px; font-family: 'Microsoft YaHei'; font-size: {font_size}px;"
         )
-        text = zh if zh else tr("（无译文）")
-        if src:
-            text = f"{text}\n\n<span style='color:#9a9aa5;font-size:{max(font_size - 3, 9)}px'>{src}</span>"
+        mode = cfg.get("display_mode", "both")  # both / zh / src
+        if mode == "src":
+            text = escape(src) if src else escape(zh or "") or tr("（无译文）")
+        elif mode == "zh":
+            text = escape(zh) if zh else tr("（无译文）")
+        else:
+            text = escape(zh) if zh else tr("（无译文）")
+            if src:
+                text = f"{text}\n\n<span style='color:#9a9aa5;font-size:{max(font_size - 3, 9)}px'>{escape(src)}</span>"
         label.setText(text)
+        label.setTextFormat(Qt.RichText)  # 转义后的实体 + span 样式按富文本渲染
         label.setWordWrap(True)
         label.setMaximumWidth(520)
         label.adjustSize()

@@ -6,6 +6,20 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.4] - 2026-10-09
+
+### 新增 / Added
+
+- **截图翻译弹窗内容可选**：设置 → 字幕外观 → 截图翻译弹窗 → 弹窗内容，可选 双语显示（原文 + 译文）/ 只显示译文 / 只显示原文，与字幕显示模式一致。
+  Screenshot-translation popup content mode (Settings → Subtitle Appearance → popup): bilingual, translation only, or original only — same options as the subtitle bar.
+
+### 修复 / Fixed
+
+- **截图翻译弹窗对原文中的特殊字符（如 `<`、`>`、`&`）做了转义处理**，避免日文/代码类文本被误当富文本渲染而显示异常。
+  Screenshot popup now escapes special characters (`<`, `>`, `&`) in recognized text, so code-like or symbol-heavy text renders correctly.
+
+---
+
 ## [v1.3.3] - 2026-10-09
 
 ### 修复 / Fixed

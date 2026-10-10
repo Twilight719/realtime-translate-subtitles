@@ -115,6 +115,7 @@ MAP = {
     "弹窗停留时长": "Popup Duration",
     "弹窗字号": "Popup Font Size",
     "弹窗背景不透明度": "Popup Background Opacity",
+    "弹窗内容": "Popup Content",
     "弹窗显示在框选区域附近；停留时长填 0 表示不自动关闭（点击弹窗关闭）。":
         "The popup appears near the selected area; set the duration to 0 to keep it "
         "open until clicked.",

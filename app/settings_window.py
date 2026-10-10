@@ -579,6 +579,14 @@ class SettingsWindow(QMainWindow):
         of.addRow(tr("弹窗字号"), self.spin_ocr_font)
         self.spin_ocr_alpha = SliderSpin(20, 255, o.get("bg_alpha", 235), step=5)
         of.addRow(tr("弹窗背景不透明度"), self.spin_ocr_alpha)
+        self.combo_ocr_display = QComboBox()
+        for code, name in [("both", tr("双语显示（原文 + 译文）")),
+                           ("zh", tr("只显示译文")),
+                           ("src", tr("只显示原文"))]:
+            self.combo_ocr_display.addItem(name, code)
+        idx = self.combo_ocr_display.findData(o.get("display_mode", "both"))
+        self.combo_ocr_display.setCurrentIndex(max(0, idx))
+        of.addRow(tr("弹窗内容"), self.combo_ocr_display)
         ocr_hint = QLabel(tr("弹窗显示在框选区域附近；停留时长填 0 表示不自动关闭（点击弹窗关闭）。"))
         ocr_hint.setObjectName("hint")
         ocr_hint.setWordWrap(True)
@@ -1309,6 +1317,7 @@ class SettingsWindow(QMainWindow):
         ocr["duration_ms"] = self.spin_ocr_duration.value()
         ocr["font_size"] = self.spin_ocr_font.value()
         ocr["bg_alpha"] = self.spin_ocr_alpha.value()
+        ocr["display_mode"] = self.combo_ocr_display.currentData()
 
         audio = cfg.get("audio")
         if audio is None:
