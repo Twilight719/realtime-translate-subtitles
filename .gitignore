@@ -18,3 +18,6 @@ dist/
 tools/screen_dbg.png
 tools/ocr_modes.png
 tools/ocr_colors.png
+
+# 内部操作手册（含本机路径等私人信息，不上传）
+RELEASE.md
