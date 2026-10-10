@@ -1,10 +1,14 @@
 """WASAPI loopback 音频捕获：抓系统声音，输出 16kHz 单声道 float32 流。"""
 
+import logging
 import queue
 import threading
+import time
 
 import numpy as np
 import soundcard as sc
+
+log = logging.getLogger("subtitle.audio")
 
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 512  # 每次回调的音频块（32ms），与 VAD 帧长一致
@@ -53,17 +57,34 @@ class AudioCapture:
             self._thread.join(timeout=2)
 
     def _run(self):
-        # WASAPI 共享模式会按请求的采样率自动重采样，直接以 16kHz 录制
-        with self.device.recorder(samplerate=SAMPLE_RATE, channels=2, blocksize=BLOCK_SIZE) as rec:
-            while not self._stop.is_set():
-                data = rec.record(numframes=BLOCK_SIZE)
-                chunk = data.mean(axis=1).astype(np.float32)
-                if len(chunk) < BLOCK_SIZE:
-                    chunk = np.pad(chunk, (0, BLOCK_SIZE - len(chunk)))
-                try:
-                    self.queue.put_nowait(chunk)
-                except queue.Full:
-                    pass  # 下游处理不过来时丢帧，避免音频线程阻塞
+        # WASAPI 共享模式会按请求的采样率自动重采样，直接以 16kHz 录制。
+        # record() 可能因音频服务重启/设备被独占抢占/系统休眠等抛异常，
+        # 这里自动重建录音器重试（指数退避），避免捕获线程无声死亡、
+        # 软件"听不到声音"只能重启监听的已知问题。
+        backoff = 1.0
+        while not self._stop.is_set():
+            try:
+                with self.device.recorder(samplerate=SAMPLE_RATE, channels=2, blocksize=BLOCK_SIZE) as rec:
+                    backoff = 1.0  # 录音器建立成功，重置退避
+                    while not self._stop.is_set():
+                        data = rec.record(numframes=BLOCK_SIZE)
+                        chunk = data.mean(axis=1).astype(np.float32)
+                        if len(chunk) < BLOCK_SIZE:
+                            chunk = np.pad(chunk, (0, BLOCK_SIZE - len(chunk)))
+                        try:
+                            self.queue.put_nowait(chunk)
+                        except queue.Full:
+                            pass  # 下游处理不过来时丢帧，避免音频线程阻塞
+            except Exception as e:
+                if self._stop.is_set():
+                    break
+                log.warning("音频捕获中断（%.0fs 后自动重连）: %s", backoff, e)
+                self._stop.wait(backoff)
+                backoff = min(backoff * 2, 15)
+
+    def is_alive(self):
+        """捕获线程是否还活着（供看门狗检测）。"""
+        return self._thread is not None and self._thread.is_alive()
 
 
 if __name__ == "__main__":

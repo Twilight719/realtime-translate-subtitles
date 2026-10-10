@@ -6,6 +6,17 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.7] - 2026-10-10
+
+### 修复 / Fixed
+
+- **长时间无语音后软件"听不到声音"、不再出字幕**：WASAPI 音频捕获线程遇到音频服务重启/设备被独占抢占/系统休眠等异常时会无声死亡，此前无任何日志且无法自愈。现在捕获线程出错会自动重连（指数退避，1s→15s），并有看门狗每 2 秒检查兜底重建——不再需要手动重启监听。
+  Fixed the app silently going deaf after a long quiet period: the WASAPI capture thread could die without any log when the audio service glitched. The capture thread now auto-reconnects with exponential backoff, and a watchdog re-checks it every 2 seconds — no more manual restart of listening.
+- **截图翻译弹窗颜色跟随字幕颜色设置**：译文/原文颜色现在与字幕颜色（设置 → 字幕外观 → 颜色）联动，不再固定黄色。
+  Screenshot-translation popup now follows the subtitle color settings instead of a hard-coded yellow.
+
+---
+
 ## [v1.3.6] - 2026-10-10
 
 ### 修复 / Fixed

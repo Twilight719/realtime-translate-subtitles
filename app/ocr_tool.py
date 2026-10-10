@@ -148,19 +148,31 @@ class OcrResultPopup(QWidget):
         label = QLabel(self)
         font_size = int(cfg.get("font_size", 15))
         bg_alpha = int(cfg.get("bg_alpha", 235))
+        zh_color = cfg.get("zh_color", "#FFE34D")  # 默认与字幕译文颜色一致
+        src_color = cfg.get("src_color", "#FFFFFF")
         label.setStyleSheet(
-            f"background: rgba(23,23,29,{bg_alpha}); color: #FFE34D; border-radius: 8px;"
+            f"background: rgba(23,23,29,{bg_alpha}); color: {zh_color}; border-radius: 8px;"
             f"padding: 12px 16px; font-family: 'Microsoft YaHei'; font-size: {font_size}px;"
         )
         mode = cfg.get("display_mode", "both")  # both / zh / src
+        # 原文行：用原文颜色调暗 + 小一号字（QLabel 富文本不支持 rgba 时退化为灰色）
+        dim_src = QColor(src_color)
+        dim_src_css = (
+            f"rgba({dim_src.red()},{dim_src.green()},{dim_src.blue()},150)"
+            if dim_src.isValid() else "#9a9aa5"
+        )
         if mode == "src":
             text = escape(src) if src else escape(zh or "") or tr("（无译文）")
+            if src:
+                label.setStyleSheet(
+                    label.styleSheet().replace(f"color: {zh_color}", f"color: {src_color}")
+                )
         elif mode == "zh":
             text = escape(zh) if zh else tr("（无译文）")
         else:
             text = escape(zh) if zh else tr("（无译文）")
             if src:
-                text = f"{text}\n\n<span style='color:#9a9aa5;font-size:{max(font_size - 3, 9)}px'>{escape(src)}</span>"
+                text = f"{text}\n\n<span style='color:{dim_src_css};font-size:{max(font_size - 3, 9)}px'>{escape(src)}</span>"
         label.setText(text)
         label.setTextFormat(Qt.RichText)  # 转义后的实体 + span 样式按富文本渲染
         label.setWordWrap(True)

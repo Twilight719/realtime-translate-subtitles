@@ -403,22 +403,33 @@ class Pipeline:
         last_check = time.time()
         while not self._stop.is_set() and self._gen == gen:
             # 每 2 秒检查默认输出设备是否变化（如插拔耳机），变了就自动切换监听源
-            if self._speaker_id is not None and time.time() - last_check > 2:
+            if time.time() - last_check > 2:
                 last_check = time.time()
-                try:
-                    import soundcard as sc
-
-                    current = sc.default_speaker().id
-                    if current != self._speaker_id:
-                        cap.stop()
-                        cap = AudioCapture(device=get_default_loopback())
+                # 看门狗：捕获线程异常死亡（理论上内部会自恢复，这里兜底）→ 重建
+                if not cap.is_alive():
+                    log.warning("检测到音频捕获线程已停止，自动重启捕获")
+                    try:
+                        cap = AudioCapture(device=cap.device, out_queue=cap.queue)
                         cap.start()
                         self._cap = cap
-                        self._speaker_id = current
                         segmenter.reset()
-                        log.info("默认音频设备已变化，已自动切换监听源: %s", cap.device.name)
-                except Exception as e:
-                    log.warning("检测音频设备变化失败: %s", e)
+                    except Exception as e:
+                        log.warning("重启音频捕获失败: %s", e)
+                if self._speaker_id is not None:
+                    try:
+                        import soundcard as sc
+
+                        current = sc.default_speaker().id
+                        if current != self._speaker_id:
+                            cap.stop()
+                            cap = AudioCapture(device=get_default_loopback())
+                            cap.start()
+                            self._cap = cap
+                            self._speaker_id = current
+                            segmenter.reset()
+                            log.info("默认音频设备已变化，已自动切换监听源: %s", cap.device.name)
+                    except Exception as e:
+                        log.warning("检测音频设备变化失败: %s", e)
             try:
                 chunk = cap.queue.get(timeout=0.2)
             except queue.Empty:
@@ -747,8 +758,13 @@ class MainApp:
             )
             return
         zh = payload.get("zh") or tr("…翻译服务暂时不可用…")
+        # 弹窗颜色跟随字幕颜色设置（ocr 段可单独覆盖）
+        ocr_cfg = dict(self.cfg.get("ocr") or {})
+        sub_cfg = self.cfg.get("subtitle") or {}
+        ocr_cfg.setdefault("zh_color", sub_cfg.get("zh_color", "#FFE34D"))
+        ocr_cfg.setdefault("src_color", sub_cfg.get("src_color", "#FFFFFF"))
         self._ocr_popup = OcrResultPopup(
-            payload["src"], zh, payload["anchor"], self.cfg.get("ocr") or {}
+            payload["src"], zh, payload["anchor"], ocr_cfg
         )
         self._ocr_popup.show()
 
