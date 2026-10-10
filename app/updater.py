@@ -146,6 +146,18 @@ def download_asset(asset, dest_path, progress_cb=None, cancel=None,
     return None, f"所有下载通道均失败（最后错误：{last_err}）"
 
 
+def find_cached_download(asset, dest_path):
+    """dest_path 已有完整且校验通过的更新包（上次下载留下的）时返回 True，可直接复用。"""
+    if not os.path.exists(dest_path):
+        return False
+    if asset.get("size") and os.path.getsize(dest_path) != asset["size"]:
+        return False
+    if verify_package(dest_path, asset.get("digest")) is not None:
+        return False
+    log.info("更新包已下载过且校验通过，复用: %s", dest_path)
+    return True
+
+
 def verify_package(path, expected_sha256=None):
     """校验更新包：必须是完整 zip；有官方摘要时再核对 sha256。返回 None=通过。"""
     import zipfile

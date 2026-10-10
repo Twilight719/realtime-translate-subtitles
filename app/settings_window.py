@@ -1111,11 +1111,15 @@ class SettingsWindow(QMainWindow):
             webbrowser.open(result["url"])
             return
         try:
-            from .updater import download_asset
+            from .updater import download_asset, find_cached_download
         except ImportError:
-            from app.updater import download_asset
+            from app.updater import download_asset, find_cached_download
 
         dest = os.path.join(tempfile.gettempdir(), asset["name"])
+        # 之前下载过完整安装包（如下载完误关了界面）→ 跳过下载，直接进入安装
+        if find_cached_download(asset, dest):
+            self._on_dl_finished(True, "cache", dest)
+            return
         self._dl_cancel = threading.Event()
         self._dl_dialog = QProgressDialog(tr("准备下载…"), tr("取消"), 0, 100, self)
         self._dl_dialog.setWindowTitle(tr("下载更新 {latest}").format(latest=result["latest"]))
@@ -1152,7 +1156,9 @@ class SettingsWindow(QMainWindow):
             )
 
     def _on_dl_finished(self, ok, info, dest):
-        self._dl_dialog.close()
+        if getattr(self, "_dl_dialog", None) is not None:
+            self._dl_dialog.close()
+            self._dl_dialog = None
         if not ok:
             if info != "已取消":
                 QMessageBox.warning(

@@ -6,6 +6,15 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.6] - 2026-10-10
+
+### 修复 / Fixed
+
+- **下载完更新包后误关界面需重新下载 750MB**：现在点「软件内下载更新」时会先检查本地是否已有完整且校验通过的安装包（上次下载留下的），有则跳过下载直接进入安装步骤；文件不完整或校验失败才会重新下载。
+  No more re-downloading the 750MB package after accidentally closing the update dialog: the updater now reuses a previously downloaded package if it is complete and passes integrity verification, jumping straight to the install step.
+
+---
+
 ## [v1.3.5] - 2026-10-10
 
 ### 修复 / Fixed
