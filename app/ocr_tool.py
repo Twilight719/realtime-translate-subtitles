@@ -78,18 +78,22 @@ def ocr_image(image_path, lang_tag=None):
 
 
 class SnipOverlay(QWidget):
-    """全屏半透明选区层：拖拽框选，Esc 取消。"""
+    """全屏选区层：显示触发瞬间冻结的屏幕画面（半透明压暗），拖拽框选，Esc 取消。
+
+    用冻结截图做背景而不是直接透视桌面：松开后直接从冻结图裁剪，
+    避免"选区层还没来得及从屏幕消失就截图"导致的偶发识别为空。"""
 
     region_selected = pyqtSignal(QRect)
     cancelled = pyqtSignal()
 
-    def __init__(self):
+    def __init__(self, bg_pixmap=None):
         super().__init__()
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setCursor(Qt.CrossCursor)
         screen = QApplication.primaryScreen().geometry()
         self.setGeometry(screen)
+        self._bg = bg_pixmap  # 触发瞬间的屏幕截图（物理像素，自带 devicePixelRatio）
         self._origin = None
         self._rect = QRect()
 
@@ -121,6 +125,8 @@ class SnipOverlay(QWidget):
 
     def paintEvent(self, e):
         p = QPainter(self)
+        if self._bg is not None and not self._bg.isNull():
+            p.drawPixmap(self.rect(), self._bg)  # Qt 按 devicePixelRatio 自动缩放
         p.fillRect(self.rect(), QColor(0, 0, 0, 100))
         if not self._rect.isNull():
             # 选区挖空 + 蓝框
@@ -184,7 +190,12 @@ def grab_region(rect: QRect):
     """截取屏幕区域保存为临时 PNG，返回文件路径。失败返回 None。"""
     screen = QApplication.primaryScreen()
     pix = screen.grabWindow(0, rect.x(), rect.y(), rect.width(), rect.height())
-    if pix.isNull():
+    return save_pixmap(pix)
+
+
+def save_pixmap(pix):
+    """把 QPixmap 存为临时 PNG，返回文件路径。失败返回 None。"""
+    if pix is None or pix.isNull():
         return None
     fd, path = tempfile.mkstemp(suffix=".png", prefix="rts_ocr_")
     os.close(fd)
@@ -192,3 +203,17 @@ def grab_region(rect: QRect):
         os.remove(path)
         return None
     return path
+
+
+def crop_frozen(pixmap, rect: QRect):
+    """从触发时冻结的屏幕图裁剪选区（逻辑坐标 → 物理像素，考虑 DPI 缩放），
+    保存为临时 PNG 返回路径；pixmap 无效时返回 None（调用方可回退 grab_region）。"""
+    if pixmap is None or pixmap.isNull():
+        return None
+    dpr = pixmap.devicePixelRatio()
+    if dpr and dpr != 1.0:
+        rect = QRect(
+            round(rect.x() * dpr), round(rect.y() * dpr),
+            round(rect.width() * dpr), round(rect.height() * dpr),
+        )
+    return save_pixmap(pixmap.copy(rect))

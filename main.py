@@ -676,15 +676,22 @@ class MainApp:
 
         if self._snip is not None:
             self._snip.close()
-        self._snip = SnipOverlay()
+        # 先抓取屏幕再盖选区层：选区画面与最终裁剪用同一张冻结图，
+        # 避免选区层未消失就截图导致的偶发"未识别到文字"
+        screen = QApplication.primaryScreen()
+        pix = screen.grabWindow(0)
+        self._snip = SnipOverlay(pix)
         self._snip.region_selected.connect(self._on_ocr_region)
         self._snip.cancelled.connect(lambda: log.info("截图翻译已取消"))
         self._snip.show()
 
     def _on_ocr_region(self, rect):
-        from app.ocr_tool import grab_region
+        from app.ocr_tool import crop_frozen, grab_region
 
-        path = grab_region(rect)
+        pix = self._snip._bg if self._snip is not None else None
+        path = crop_frozen(pix, rect)
+        if path is None:  # 冻结图不可用时回退到直接截屏（选区层已隐藏）
+            path = grab_region(rect)
         if path is None:
             log.warning("截图失败")
             return

@@ -6,6 +6,15 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.5] - 2026-10-10
+
+### 修复 / Fixed
+
+- **每次启动后的第一次截图翻译偶发"未识别到文字"**：旧流程在松开鼠标同一瞬间截取屏幕，选区遮罩层可能还没从屏幕合成器中消失，截到的是被压暗的画面导致 OCR 失败（首次启动时图形管线未预热更容易触发）。现在改为**按下热键的瞬间先冻结屏幕画面**，选区层直接显示这张冻结图，松开后从中裁剪——所见即所截，彻底消除该竞态。
+  Fixed the intermittent "no text recognized" on the first screenshot translation after launch: the old flow captured the screen in the same instant the selection overlay disappeared, so it could capture the still-dimmed frame. The screen is now frozen the moment the hotkey fires, the overlay shows that frozen frame, and the selection is cropped from it — what you see is what gets recognized.
+
+---
+
 ## [v1.3.4] - 2026-10-09
 
 ### 新增 / Added
