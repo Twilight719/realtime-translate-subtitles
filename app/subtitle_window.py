@@ -153,7 +153,8 @@ class SubtitleWindow(QWidget):
     def show_final(self, src, zh):
         """段落定稿：当前句完整版以稳定样式显示，上一句译文挪到历史行。"""
         if zh and zh != self._last_final_zh:
-            self.label_history.setText(self._last_final_zh)
+            # 历史行同样要转义：译文里出现 < > & 时不能被 Qt 当富文本解析
+            self.label_history.setText(escape(self._last_final_zh))
             self._last_final_zh = zh
         self.label_src.setText(f'<span style="color:{self._src_color};">{escape(src)}</span>')
         self.label_zh.setText(f'<span style="color:{self._zh_color};">{escape(zh)}</span>')

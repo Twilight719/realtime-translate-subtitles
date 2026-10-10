@@ -13,13 +13,16 @@ user32 = ctypes.windll.user32
 
 
 def parse_hotkey(hotkey):
-    """'alt+t' → (修饰键掩码, 虚拟键码)"""
+    """'alt+t' → (修饰键掩码, 虚拟键码)；必须至少带一个修饰键。"""
     parts = [p.strip().lower() for p in hotkey.split("+")]
     mods = MOD_NOREPEAT
     for p in parts[:-1]:
         if p not in MODIFIERS:
             raise ValueError(f"未知修饰键: {p}")
         mods |= MODIFIERS[p]
+    # 裸键（如 config.yaml 里手写成 hotkey: t）会在任何窗口里劫持该按键，必须要求修饰键
+    if not mods & (MODIFIERS["alt"] | MODIFIERS["ctrl"] | MODIFIERS["shift"] | MODIFIERS["win"]):
+        raise ValueError("热键至少需要 Ctrl/Alt/Shift/Win 之一")
     key = parts[-1]
     if len(key) == 1:
         vk = ord(key.upper())
@@ -58,12 +61,14 @@ class HotkeyManager:
         self._vk = None
 
     def start(self):
-        self._mods, self._vk = parse_hotkey(self.hotkey)
+        # 先校验参数：热键非法时不应破坏已有的注册
+        mods, vk = parse_hotkey(self.hotkey)
+        # 再注销可能存在的旧注册：同一 id 二次 RegisterHotKey 会直接失败，
+        # 所以 start() 必须幂等（回退恢复旧热键的路径依赖这一点）
+        self.stop()
+        self._mods, self._vk = mods, vk
         if not user32.RegisterHotKey(None, self.hotkey_id, self._mods, self._vk):
             raise RuntimeError(f"注册全局热键失败: {self.hotkey}（可能被其他程序占用）")
-        if self._filter is not None:
-            # 重复 start（如回退恢复旧热键）前先摘掉旧过滤器，避免重复安装
-            self.app.removeNativeEventFilter(self._filter)
         self._filter = _HotkeyFilter(self.hotkey_id, self._handle)
         self.app.installNativeEventFilter(self._filter)
 

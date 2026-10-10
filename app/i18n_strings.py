@@ -49,7 +49,6 @@ MAP = {
     "当前配置": "Current Configuration",
     "全局热键": "Global Hotkeys",
     "音频来源": "Audio Source",
-    "识别模型": "Recognition Model",
     "翻译后端": "Translation Backend",
     "恢复默认 (Alt+T)": "Reset to Default (Alt+T)",
     "启停监听": "Toggle Listening",

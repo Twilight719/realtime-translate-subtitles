@@ -6,7 +6,6 @@ onnxruntime>=1.17
 sherpa-onnx>=1.10
 soundcard>=0.4
 numpy
-scipy
 sentencepiece
 PyQt5>=5.15
 PyYAML>=6.0

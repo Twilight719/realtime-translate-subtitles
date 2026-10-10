@@ -61,9 +61,12 @@ class FallbackTranslator(Translator):
                 continue  # 冷却中，跳过
             tried_any = True
             try:
-                if on_delta is not None and getattr(backend, "supports_stream", False):
-                    return backend.translate(text, src_lang, target, on_delta=on_delta)
-                return backend.translate(text, src_lang, target)
+                result = self._call(backend, text, src_lang, target, on_delta)
+                if result and str(result).strip():
+                    return result
+                # 空结果不等于成功：继续下一个后端，否则字幕只会显示空白
+                log.info("翻译后端 %s 返回空结果，换下一个后端", backend.name)
+                last_err = RuntimeError("%s 返回空结果" % backend.name)
             except TranslationTextError as e:
                 # 文本级错误：该条文本它翻不了，换下一个后端，但不计入冷却
                 log.info("翻译后端 %s 无法处理该文本: %s", backend.name, e)
@@ -76,10 +79,19 @@ class FallbackTranslator(Translator):
             # 全部在冷却中：仍按顺序尝试一次，避免长时间无翻译
             for backend in self.backends:
                 try:
-                    if on_delta is not None and getattr(backend, "supports_stream", False):
-                        return backend.translate(text, src_lang, target, on_delta=on_delta)
-                    return backend.translate(text, src_lang, target)
+                    result = self._call(backend, text, src_lang, target, on_delta)
+                    if result and str(result).strip():
+                        return result
+                    log.info("翻译后端 %s 返回空结果，换下一个后端", backend.name)
+                    last_err = RuntimeError("%s 返回空结果" % backend.name)
                 except Exception as e:
                     self._failed_at[backend] = time.time()
                     last_err = e
         raise last_err
+
+    @staticmethod
+    def _call(backend, text, src_lang, target, on_delta):
+        """按后端是否声明支持流式，决定要不要把 on_delta 传下去。"""
+        if on_delta is not None and getattr(backend, "supports_stream", False):
+            return backend.translate(text, src_lang, target, on_delta=on_delta)
+        return backend.translate(text, src_lang, target)

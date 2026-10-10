@@ -1,20 +1,24 @@
 # 实时翻译字幕配置（模板：复制为 config.yaml 后按需修改）
+# 内容与程序内置默认配置保持一致；config.yaml 不存在时会按这份默认值自动生成。
 
 audio:
-  device_name:             # null = 默认扬声器 loopback；也可填 audio_capture.py 自测列出的设备名
+  source: loopback         # loopback = 听系统声音（游戏/视频）；mic = 听麦克风（会议/网课）
+  device_name:             # null = 默认设备；也可填设置页“音频来源”里列出的设备名
 
 whisper:
-  model_size: small        # tiny / base / small / medium
+  engine: whisper          # whisper = 精准（可选 large-v3-turbo）；sensevoice = 极速（CPU 即可，约 30 倍实时速度，仅支持 中/英/日/韩/粤）
+  model_size: small        # tiny / base / small / medium / large-v3-turbo（最准，首次需下载约 1.6GB）
   device: cuda             # cuda / cpu
-  compute_type: float16    # cuda 用 float16；cpu 建议 int8
+  compute_type: float16    # cuda 用 float16 或 int8_float16（更快更省显存）；cpu 建议 int8
   beam_size: 1             # 1 = 最快；提到 3~5 质量略好但更慢
+  prompt:                  # 识别提示词（可选）：作品名/角色名/术语，如“原神 派蒙 元素爆发”，专名更准
 
 vad:
   threshold: 0.5
   min_speech_ms: 250
-  min_silence_ms: 400
+  min_silence_ms: 250        # 停顿多久判定一句结束（调小出字幕更快，太小会把长句切断）
   max_segment_s: 10        # 连续说话时每段最长秒数（强制切段）
-  partial_interval_s: 1.5  # 说话过程中每隔多少秒出一次实时快照字幕（调小更跟手，翻译请求更频繁）
+  partial_interval_s: 0.8  # 说话过程中每隔多少秒出一次实时快照字幕（调小更跟手，翻译请求更频繁）
 
 language:
   source: auto             # 源语言：auto=自动检测；看单一语言视频可锁定 zh/en/ja/ko/ru，识别更快更准
@@ -31,21 +35,33 @@ translator:
   llm_api:
     base_url: https://api.deepseek.com/v1
     api_key: ""             # 填 key 后在 order 里加 llm_api 即启用
-    model: deepseek-flash
+    model: deepseek-flash   # DeepSeek 最新 V4.1 Flash；旧名 deepseek-chat 已被路由到此
     context_size: 1
+    stream: true            # true=译文逐字上屏（更实时）；false=整句翻完一次性显示
 
 subtitle:
   width: 700
   font_size: 22
   fade_ms: 5000            # 无新字幕多少毫秒后淡出
   click_through: true      # true=点击穿透（不影响游戏）；false=可拖动位置
+  display_mode: both       # both=双语显示；zh=只显示译文；src=只显示原文
   x: 300
   y: 800
   bg_alpha: 140
   zh_color: '#FFE34D'
   src_color: '#FFFFFF'
 
+ocr:
+  duration_ms: 8000        # 截图翻译弹窗停留毫秒数（0=不自动关闭，点击关闭）
+  font_size: 15            # 弹窗字号
+  bg_alpha: 235            # 弹窗背景不透明度（0~255）
+
 ui:
   font_size: 13            # 设置界面字体大小（10~22），改大后窗口可手动拉大
+  language: zh             # 界面语言：zh=中文；en=English（重启后生效）
 
-hotkey: alt+t              # 全局启停快捷键
+app:
+  autostart: false         # 开机自动启动（托盘常驻）
+
+hotkey: alt+t              # 全局启停快捷键（设置页可自定义，格式如 ctrl+shift+t）
+hotkey_ocr: ctrl+alt+r     # 截图翻译快捷键：框选屏幕区域 → OCR 识别 → 翻译（看漫画/图片文字用）

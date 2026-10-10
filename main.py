@@ -229,6 +229,8 @@ class Pipeline:
         self._cap = None
         self._threads = []
         self._stop = threading.Event()
+        # 模型加载完成时置位：由 VAD 线程自己丢弃加载期间累积的旧音频
+        self._vad_reset_pending = threading.Event()
         self._gen = 0  # 代数标记：旧线程发现代数变了立即退出，防止僵尸线程抢任务
         # 定稿段落：有序、容量小，满时丢弃最旧的（优先跟上当前语音，避免延迟越积越多）
         self._seg_q = queue.Queue(maxsize=3)
@@ -263,13 +265,9 @@ class Pipeline:
         if self._cap is not None:
             return
         self._stop.clear()
+        self._vad_reset_pending.clear()
         # 清空队列里的残留：上次停止时可能留有旧语音，混入会造成识别错乱
-        for q in (self._seg_q, self._partial_q):
-            while True:
-                try:
-                    q.get_nowait()
-                except queue.Empty:
-                    break
+        self._drain_queues()
         threading.Thread(target=self._load_models_safe, daemon=True).start()
         audio_cfg = self.cfg.get("audio") or {}
         source = audio_cfg.get("source", "loopback")
@@ -313,6 +311,15 @@ class Pipeline:
         for t in self._threads:
             t.join(timeout=2)
         self._threads = []
+
+    def _drain_queues(self):
+        """丢弃待处理队列里的全部条目（启动、模型就绪等时间点上的过期语音）。"""
+        for q in (self._seg_q, self._partial_q):
+            while True:
+                try:
+                    q.get_nowait()
+                except queue.Empty:
+                    break
 
     @staticmethod
     def _put_latest(q, item, kind):
@@ -370,6 +377,9 @@ class Pipeline:
     def _load_models_safe(self):
         try:
             self._ensure_models()
+            # 加载期间（首次要下载模型，可能几分钟）采集的音频已经过期：
+            # 让 VAD 线程丢弃已累积的缓冲，避免就绪后补翻几分钟前的旧语音
+            self._vad_reset_pending.set()
             # 加载完成后告知用户（首次下载模型可能需要几分钟，之前没有任何就绪提示）
             if self._cap is not None:
                 log.info("模型已就绪")
@@ -402,6 +412,11 @@ class Pipeline:
         cap = self._cap
         last_check = time.time()
         while not self._stop.is_set() and self._gen == gen:
+            if self._vad_reset_pending.is_set():
+                # 模型刚加载完：丢弃加载期间累积的旧音频，只从新语音开始出字幕
+                # （由 VAD 线程自己复位，避免跨线程改 segmenter 状态）
+                self._vad_reset_pending.clear()
+                segmenter.reset()
             # 每 2 秒检查默认输出设备是否变化（如插拔耳机），变了就自动切换监听源
             if time.time() - last_check > 2:
                 last_check = time.time()
@@ -464,6 +479,9 @@ class Pipeline:
                 "zh": tr("模型加载失败：{err}。请检查网络后重新按热键重试").format(err=self._model_error),
             })
             return
+        # 加载期间（首次要下载模型，可能几分钟）采集到的音频早已过期：
+        # 清掉积压，否则就绪瞬间会集中补翻几分钟前的旧语音
+        self._drain_queues()
         live = LiveCaptionState(
             lambda t, lang: self._translator.translate(t, lang, self._target_lang())
         )
@@ -479,7 +497,9 @@ class Pipeline:
             seg, is_partial = item
             try:
                 tag = "实时快照" if is_partial else "语音片段"
-                log.info("%s %.1fs，开始识别", tag, len(seg) / 16000)
+                # 快照每 0.8 秒就来一次，按 INFO 记会把滚动日志刷满，降到 DEBUG
+                log_fn = log.debug if is_partial else log.info
+                log_fn("%s %.1fs，开始识别", tag, len(seg) / 16000)
                 text, lang = self._transcriber.transcribe(
                     seg, language=self._source_lock(),
                     prompt=(self.cfg.get("whisper") or {}).get("prompt"),
@@ -490,7 +510,7 @@ class Pipeline:
                     # 快照：走 LocalAgreement，定稿区稳定、尾部滚动
                     payload = live.update(text, lang)
                     self.on_subtitle(payload)
-                    log.info("识别 [%s]（实时）: %s", lang, text)
+                    log.debug("识别 [%s]（实时）: %s", lang, text)
                 else:
                     # 段落定稿：整句重译，挪入历史行
                     live.reset()
