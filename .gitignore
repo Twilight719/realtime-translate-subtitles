@@ -16,3 +16,5 @@ dist/
 
 # 测试调试截图
 tools/screen_dbg.png
+tools/ocr_modes.png
+tools/ocr_colors.png
