@@ -10,36 +10,25 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ### 修复 / Fixed
 
-- **在线翻译后端卡住时字幕会彻底停更**：有道/大模型都带超时，但 Google 与 MyMemory 走的是第三方库的请求层、本身没有超时——网络抖动或被代理拦截时，唯一的识别工作线程会一直等下去，字幕不再更新、也无法回退到下一个后端。现在两个后端都改为自带超时的直连请求（MyMemory 10 秒 / Google 8 秒），并像有道那样把已知的源语言明确传给 Google；超时按后端故障处理并自动回退。
-  Fixed subtitles freezing completely on a stalled online backend: Google and MyMemory used a request layer with no timeout at all, so a stalled or intercepted connection blocked the only worker thread indefinitely. Both now use direct requests with explicit timeouts (MyMemory 10s / Google 8s), pass the known source language to Google like the Youdao backend does, and fall back like any other backend failure.
-- **后端返回空译文时字幕会变空白**：回退链把「返回空字符串」当成翻译成功，后面的后端（大模型 / NLLB 本地模型）不会兜底。现在空结果视同该后端翻不了，自动继续下一个后端。
-  Empty translations are no longer treated as success: the fallback chain now moves on to the next backend (LLM / local NLLB) instead of showing a blank line.
-- **一句话太长时会把 MyMemory 后端冷却 60 秒**：超过 MyMemory 上限（500 字符）的文本会报错，旧逻辑把它当成服务故障，导致整个后端被停用一分钟。现在这类「文本级错误」只换下一个后端，不再冷却。
-  Over-long text no longer penalizes the MyMemory backend with a 60-second cooldown: text-level errors (its 500-character limit) now just move on to the next backend.
-- **手改配置文件把热键写成裸键会劫持键盘**：热键解析以前接受不带修饰键的单键（如 `hotkey: t`），一旦写进 config.yaml，任何窗口里敲这个键都会触发启停。现在必须带 Ctrl/Alt/Shift/Win 之一，设置页会给出提示并保留原热键。
-  A bare key in config.yaml (e.g. `hotkey: t`) used to hijack that key everywhere. Hotkeys now require Ctrl/Alt/Shift/Win; otherwise the settings page warns you and keeps the previous hotkey.
-- **模型加载完成后会「补翻」之前的旧语音**：首次运行要下载识别模型（约 460MB，可能几分钟），这段时间采集的音频会积压在待处理队列里，模型就绪后集中翻出来，字幕出现明显过期的内容。现在模型就绪即丢弃积压，只处理新语音。
-  No more burst of stale subtitles right after the model finishes loading: audio captured while the model was still downloading is discarded once the model is ready.
-- **译文里出现 `<` `>` `&` 时字幕历史行显示异常**：字幕条的历史行没有做 HTML 转义（原文行和译文行都做了），含这些字符的译文可能被当成富文本解析。现在三行统一转义。
-  The history line is now HTML-escaped like the other two lines, so translations containing `<`, `>` or `&` render literally.
-- **英文界面侧边栏把「识别模型」显示成 Recognition Model**：翻译映射表里同一条中文重复登记了两次，后一条把前一条覆盖了。
-  Fixed the English sidebar showing "Recognition Model" instead of "Recognition" (a duplicated entry in the translation map).
+- **网络卡顿时字幕彻底停更**：Google 和 MyMemory 翻译后端之前没有请求超时，网络抖动或被拦截时会一直卡住，字幕不再更新。现在两个后端都加了超时（10 秒/8 秒），卡住自动切换下一个后端。
+  Fixed subtitles freezing on network stalls: the Google and MyMemory backends had no request timeout and could block indefinitely. Both now have timeouts (10s/8s) and fall back to the next backend automatically.
+- **后端返回空译文导致字幕空白**：空结果现在视同翻译失败，自动回退到下一个后端（大模型/本地模型）兜底。
+  Empty translation results are now treated as failures and fall back to the next backend instead of showing a blank line.
+- **超长文本误伤 MyMemory 后端**：超过其 500 字符上限的文本不再让整个后端冷却 60 秒，只换下一个后端处理。
+  Over-long text no longer triggers a 60-second cooldown of the MyMemory backend.
+- **热键被误配成单个字母会劫持键盘**：热键现在必须包含 Ctrl/Alt/Shift/Win 之一，配置写错时设置页会提示并保留原热键。
+  Hotkeys now require a modifier key (Ctrl/Alt/Shift/Win); a bare key in the config no longer hijacks that key system-wide.
+- **首次启动模型加载完成后"补翻"旧语音**：模型下载期间积压的音频会在模型就绪时丢弃，不再集中翻出一堆过期字幕。
+  Audio queued while the model was still downloading is now discarded once the model is ready, instead of producing a burst of stale subtitles.
+- **译文含 `<` `>` `&` 时历史行显示异常**：字幕条三行现在统一做转义处理。
+  The history line is now escaped like the other two lines, so special characters render literally.
 
 ### 优化 / Changed
 
-- **实时快照不再刷屏日志**：先前每个快照（约每 0.8 秒一次）都会把识别原文写进 app.log，长时间使用会把滚动日志占满、把真正有用的信息挤出去。快照改记到调试级别，定稿结果与错误仍按原样记录。
-  Live snapshots no longer flood app.log (they are logged at debug level now); finalized results and errors are still recorded as before.
-- **示例配置跟上程序默认值**：config.example.yaml 补齐了缺失的 11 项（音频来源、识别引擎与提示词、截图弹窗三项、字幕内容模式、大模型流式开关、界面语言、开机自启、截图翻译热键），数值与程序内置默认完全一致。
-  config.example.yaml is in sync with the built-in defaults again (11 missing keys added).
-
-### 排查工具 / Internal
-
-- **热键管理器重复启动不再报错**：同一 id 二次注册在 Windows 上会直接失败；现在 `start()` 先校验参数、再注销旧注册，重复调用是安全的（回退恢复旧热键的路径依赖它）。
-  HotkeyManager.start() is now idempotent (it validates first, then unregisters the previous registration), so the fallback path that restores an old hotkey is safe.
-- **测试脚本不再往仓库里写截图**：点击穿透与托盘图标的调试图改为输出到系统临时目录，避免「跑完测试随手 git add -A」把调试图片提交进仓库。
-  Test scripts now write their debug screenshots to the system temp directory instead of the repository.
-- **依赖清单去掉没有用到的 scipy**：代码与所有运行时依赖都不引用它（打包时也没被收进去），安装依赖时可以少装一个包。
-  Removed the unused scipy dependency from requirements.txt.
+- **日志不再被实时快照刷屏**：约每秒一条的滚动识别日志改记调试级别，日志页只看得到有用信息。
+  Live-snapshot recognition logs moved to debug level so the log page stays readable.
+- **示例配置文件与程序默认值同步**（config.example.yaml 补齐 11 个缺失项）。
+  config.example.yaml is back in sync with the built-in defaults.
 
 ---
 
