@@ -5,9 +5,11 @@
 """
 
 import hashlib
+import json
 import logging
 import os
 import re
+import time
 
 import requests
 
@@ -26,6 +28,39 @@ DOWNLOAD_MIRRORS = [
 # 更新包资产名特征（避免误选源码 zip 等其他附件）
 ASSET_SUFFIX = "windows-x64.zip"
 
+# 启动时的自动检查节流间隔：避免每次启动都请求 GitHub API（匿名限流 60 次/小时/IP）
+AUTO_CHECK_INTERVAL_S = 6 * 3600
+
+
+def _state_path():
+    """节流状态文件路径（环境变量 RTS_UPDATE_STATE 可覆盖，测试用）。"""
+    override = os.environ.get("RTS_UPDATE_STATE")
+    if override:
+        return override
+    from .paths import base_dir
+
+    return os.path.join(base_dir(), "update_state.json")
+
+
+def auto_check_due():
+    """启动时的自动更新检查是否到期（手动点“检查更新”不受此限制）。"""
+    try:
+        with open(_state_path(), encoding="utf-8") as f:
+            last = float(json.load(f).get("last_check", 0))
+    except (OSError, ValueError, TypeError):
+        return True
+    return time.time() - last >= AUTO_CHECK_INTERVAL_S
+
+
+def mark_auto_checked():
+    """记录本次自动检查时间（仅当确实拿到了服务器响应时调用，网络失败不记，
+    下次启动立即重试）。"""
+    try:
+        with open(_state_path(), "w", encoding="utf-8") as f:
+            json.dump({"last_check": time.time()}, f)
+    except OSError:
+        log.warning("更新检查节流状态写入失败", exc_info=True)
+
 
 def parse_version(text):
     """'v1.2.3' / '1.2.3' → (1, 2, 3)；无法解析时返回 None。"""
@@ -42,7 +77,7 @@ def check_update(timeout=8):
     """
     if "YOUR_USERNAME" in GITHUB_REPO:
         return {"has_update": False, "latest": None, "url": GITHUB_RELEASES_URL,
-                "error": "尚未配置仓库地址", "asset": None}
+                "error": "尚未配置仓库地址", "asset": None, "reachable": False}
     try:
         resp = requests.get(
             f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
@@ -51,7 +86,7 @@ def check_update(timeout=8):
         )
         if resp.status_code == 404:
             return {"has_update": False, "latest": None, "url": GITHUB_RELEASES_URL,
-                    "error": "仓库还没有发布任何 Release", "asset": None}
+                    "error": "仓库还没有发布任何 Release", "asset": None, "reachable": True}
         resp.raise_for_status()
         data = resp.json()
         latest_tag = data.get("tag_name", "")
@@ -59,7 +94,7 @@ def check_update(timeout=8):
         current_ver = parse_version(__version__)
         if latest_ver is None:
             return {"has_update": False, "latest": latest_tag, "url": GITHUB_RELEASES_URL,
-                    "error": f"无法解析最新版本号: {latest_tag}", "asset": None}
+                    "error": f"无法解析最新版本号: {latest_tag}", "asset": None, "reachable": True}
         asset = None
         for a in data.get("assets", []):
             if a.get("name", "").endswith(ASSET_SUFFIX):
@@ -77,6 +112,7 @@ def check_update(timeout=8):
             "url": data.get("html_url") or GITHUB_RELEASES_URL,
             "error": None,
             "asset": asset,
+            "reachable": True,
         }
     except requests.RequestException as e:
         log.warning("检查更新失败: %s", e)
@@ -89,7 +125,7 @@ def check_update(timeout=8):
         else:
             msg = f"网络请求失败：{type(e).__name__}"
         return {"has_update": False, "latest": None, "url": GITHUB_RELEASES_URL,
-                "error": msg, "asset": None}
+                "error": msg, "asset": None, "reachable": False}
 
 
 def candidate_urls(asset_url):
@@ -176,6 +212,9 @@ def verify_package(path, expected_sha256=None):
                 h.update(chunk)
         if h.hexdigest().lower() != expected_sha256.lower():
             return "文件校验和不匹配（下载可能被损坏）"
+    else:
+        # Release API 未返回摘要（如接口变化）：不能静默跳过，留下痕迹便于排查
+        log.warning("官方未提供 sha256 摘要，%s 仅校验了 zip 完整性", os.path.basename(path))
     return None
 
 

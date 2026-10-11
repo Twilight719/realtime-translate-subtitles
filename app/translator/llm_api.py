@@ -34,16 +34,32 @@ class LlmApiTranslator(Translator):
         self.timeout = timeout
         self.stream = stream
         self._history = []  # [(原文, 译文), ...]
+        self._ctx_key = None  # 上一次翻译的语言组合，变化时清空上下文
         # 复用长连接：免去每次请求的 TCP+TLS 握手，每次省 0.2~0.5 秒
         self._session = requests.Session()
 
     def _messages(self, text, target):
         messages = [{"role": "system", "content": _system_prompt(target)}]
-        for src, tgt in self._history[-self.context_size:]:
+        keep = max(0, int(self.context_size or 0))
+        for src, tgt in (self._history[-keep:] if keep else []):
             messages.append({"role": "user", "content": src})
             messages.append({"role": "assistant", "content": tgt})
         messages.append({"role": "user", "content": text})
         return messages
+
+    def _record_context(self, text, result, src_lang, target):
+        """记录本轮翻译并裁剪上下文。源/目标语言变化时先清空：
+        旧语言的对话记录喂给模型会干扰新语言的译文。"""
+        ctx_key = (src_lang or None, target)
+        if self._ctx_key is not None and ctx_key != self._ctx_key:
+            self._history.clear()
+        self._ctx_key = ctx_key
+        self._history.append((text, result))
+        keep = max(0, int(self.context_size or 0))
+        if keep:
+            del self._history[:-keep]
+        else:
+            self._history.clear()
 
     def translate(self, text, src_lang, target="zh", on_delta=None):
         """on_delta(累计译文) 不为 None 且开启 stream 时逐段上屏，否则一次性返回。"""
@@ -80,7 +96,7 @@ class LlmApiTranslator(Translator):
             resp.raise_for_status()
             result = resp.json()["choices"][0]["message"]["content"].strip()
 
-        self._history.append((text, result))
+        self._record_context(text, result, src_lang, target)
         return result
 
     def close(self):

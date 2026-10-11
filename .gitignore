@@ -10,6 +10,9 @@ models/
 config.yaml
 *.log
 
+# 更新检查节流状态（运行时生成）
+update_state.json
+
 # PyInstaller 产物
 build/
 dist/
@@ -23,3 +26,6 @@ rts_*.png
 
 # 内部操作手册（含本机路径等私人信息，不上传）
 RELEASE.md
+
+# 内部优化规划（不上传公开仓库）
+v1.4.0-优化规划.md

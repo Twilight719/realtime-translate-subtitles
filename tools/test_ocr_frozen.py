@@ -3,7 +3,7 @@
 import os
 import sys
 
-sys.path.insert(0, r"D:\翻译插件")
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import PyQt5
 from PyQt5.QtCore import QCoreApplication, QPoint, Qt

@@ -11,7 +11,7 @@ from html import escape
 
 from PyQt5.QtCore import Qt, QTimer, pyqtSignal
 from PyQt5.QtGui import QColor, QFont, QPainter
-from PyQt5.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PyQt5.QtWidgets import QApplication, QLabel, QVBoxLayout, QWidget
 
 from .i18n import tr
 from . import i18n_strings  # noqa: F401  注册中英文映射
@@ -105,7 +105,7 @@ class SubtitleWindow(QWidget):
         width = cfg.get("width", 700)
         self.setMinimumWidth(width)
         self.setMaximumWidth(width)
-        self.move(cfg.get("x", 300), cfg.get("y", 800))
+        self.move(*self._clamped_pos(cfg.get("x", 300), cfg.get("y", 800), width))
 
         self.subtitle_ready.connect(self._show_simple)
         self._apply_display_mode()
@@ -152,8 +152,9 @@ class SubtitleWindow(QWidget):
 
     def show_final(self, src, zh):
         """段落定稿：当前句完整版以稳定样式显示，上一句译文挪到历史行。"""
-        if zh and zh != self._last_final_zh:
-            # 历史行同样要转义：译文里出现 < > & 时不能被 Qt 当富文本解析
+        if zh:
+            # 历史行同样要转义：译文里出现 < > & 时不能被 Qt 当富文本解析。
+            # 必须无条件刷新：连续两句译文相同时若跳过，历史行会停留在上上句
             self.label_history.setText(escape(self._last_final_zh))
             self._last_final_zh = zh
         self.label_src.setText(f'<span style="color:{self._src_color};">{escape(src)}</span>')
@@ -178,6 +179,20 @@ class SubtitleWindow(QWidget):
         self._idle_timer.start(self.fade_ms)
 
     # ---------- 外观配置 ----------
+
+    def _clamped_pos(self, x, y, w=None):
+        """把窗口位置夹回屏幕可用范围：改分辨率/换显示器后字幕窗不至于整个跑到屏幕外。
+        （多显示器场景暂按主屏处理，副屏支持在后续版本加入）"""
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return x, y
+        geo = screen.availableGeometry()
+        if w is None:
+            w = self.width() or 700
+        keep = 48  # 至少留这么多像素在屏幕内，方便用户拖回来
+        x = max(geo.left() - w + keep, min(x, geo.right() - keep))
+        y = max(geo.top(), min(y, geo.bottom() - keep))
+        return x, y
 
     def _apply_through(self):
         """按当前 click_through 状态应用点击穿透（Qt 属性 + Win32 样式双保险）。"""
@@ -219,7 +234,7 @@ class SubtitleWindow(QWidget):
                 self.hide()
                 self.show()
 
-        self.move(cfg.get("x", 300), cfg.get("y", 800))
+        self.move(*self._clamped_pos(cfg.get("x", 300), cfg.get("y", 800), width))
         self.adjustSize()
         self.update()
 

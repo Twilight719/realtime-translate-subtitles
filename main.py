@@ -76,7 +76,8 @@ QCoreApplication.addLibraryPath(
     os.path.join(os.path.dirname(_PyQt5.__file__), "Qt5", "plugins")
 )
 
-from app.audio_capture import AudioCapture, get_default_loopback, list_loopback_devices
+from app.audio_capture import (AudioCapture, get_default_input, get_default_loopback,
+                               list_loopback_devices)
 from app.hotkeys import HotkeyManager
 from app.i18n import set_language, tr
 import app.i18n_strings  # noqa: F401  注册中英文映射
@@ -218,6 +219,14 @@ def _whisper_model_params(w):
     return w
 
 
+def _close_quiet(obj):
+    """尽力关闭对象（翻译后端等），失败只记日志、不影响主流程。"""
+    try:
+        obj.close()
+    except Exception:
+        log.warning("关闭资源失败", exc_info=True)
+
+
 class Pipeline:
     """捕获 → VAD → 识别 → 翻译 的后台流水线，可整体启停。"""
 
@@ -239,7 +248,10 @@ class Pipeline:
         self._model_lock = threading.Lock()
         self._model_ready = threading.Event()
         self._model_error = None
-        self._speaker_id = None
+        # 未指定设备名时记录系统默认设备（扬声器/麦克风）的 id：运行中插拔耳机等
+        # 导致默认设备变化后自动跟随（见 _vad_loop_inner 看门狗三）
+        self._default_id = None
+        self._default_kind = None
 
     def _ensure_models(self):
         """首次启动时在后台线程加载模型，不卡 UI。"""
@@ -273,13 +285,22 @@ class Pipeline:
         source = audio_cfg.get("source", "loopback")
         self._cap = AudioCapture(device=pick_device(audio_cfg.get("device_name"), source))
         self._cap.start()
-        # 仅在使用"默认扬声器 loopback"时记录扬声器 id，用于后续检测插拔耳机导致的设备切换
-        if source == "mic" or audio_cfg.get("device_name"):
-            self._speaker_id = None
-        else:
+        # 未指定具体设备时记录当前系统默认设备 id：运行中插拔耳机/换默认麦克风
+        # 会导致默认设备变化，检测到后自动跟随（见看门狗三）
+        self._default_id = None
+        self._default_kind = None
+        if not audio_cfg.get("device_name"):
             import soundcard as sc
 
-            self._speaker_id = sc.default_speaker().id
+            try:
+                if source == "mic":
+                    self._default_id = sc.default_microphone().id
+                    self._default_kind = "mic"
+                else:
+                    self._default_id = sc.default_speaker().id
+                    self._default_kind = "loopback"
+            except Exception as e:
+                log.warning("读取默认音频设备失败: %s", e)
         v = self.cfg.get("vad", {})
         segmenter = VadSegmenter(
             on_segment=self._enqueue_segment,
@@ -311,6 +332,15 @@ class Pipeline:
         for t in self._threads:
             t.join(timeout=2)
         self._threads = []
+
+    def close(self):
+        """程序退出前调用：停止流水线并释放翻译后端（连接池等）。"""
+        self.stop()
+        with self._model_lock:
+            translator = self._translator
+            self._translator = None
+        if translator is not None:
+            _close_quiet(translator)
 
     def _drain_queues(self):
         """丢弃待处理队列里的全部条目（启动、模型就绪等时间点上的过期语音）。"""
@@ -355,8 +385,10 @@ class Pipeline:
                 self.stop()
                 self.start()
         if reload_translator:
-            self._translator = None
-            threading.Thread(target=self._rebuild_translator, daemon=True).start()
+            with self._model_lock:
+                old = self._translator
+                self._translator = None
+            threading.Thread(target=self._rebuild_translator, args=(old,), daemon=True).start()
 
     def get_translator(self):
         """获取翻译链（OCR 等不经过音频流水线的功能也用）。未构建时现场构建。"""
@@ -365,7 +397,7 @@ class Pipeline:
                 self._translator = build_chain(self.cfg["translator"])
             return self._translator
 
-    def _rebuild_translator(self):
+    def _rebuild_translator(self, old=None):
         try:
             translator = build_chain(self.cfg["translator"])
             with self._model_lock:
@@ -373,6 +405,12 @@ class Pipeline:
             log.info("翻译后端已重建: %s", self.cfg["translator"].get("order"))
         except Exception as e:
             log.exception("翻译后端重建失败: %s", e)
+            return
+        if old is not None:
+            # 旧链可能正被工作线程使用（在途请求）：延迟 10 秒再关，避免掐断正在进行的翻译
+            timer = threading.Timer(10.0, _close_quiet, args=(old,))
+            timer.daemon = True
+            timer.start()
 
     def _load_models_safe(self):
         try:
@@ -411,36 +449,40 @@ class Pipeline:
     def _vad_loop_inner(self, segmenter, gen):
         cap = self._cap
         last_check = time.time()
+        last_recover = 0.0
         while not self._stop.is_set() and self._gen == gen:
             if self._vad_reset_pending.is_set():
                 # 模型刚加载完：丢弃加载期间累积的旧音频，只从新语音开始出字幕
                 # （由 VAD 线程自己复位，避免跨线程改 segmenter 状态）
                 self._vad_reset_pending.clear()
                 segmenter.reset()
-            # 每 2 秒检查默认输出设备是否变化（如插拔耳机），变了就自动切换监听源
+            # 每 2 秒做一轮健康检查（捕获线程存活 / 设备是否失效 / 默认设备是否变化）
             if time.time() - last_check > 2:
                 last_check = time.time()
-                # 看门狗：捕获线程异常死亡（理论上内部会自恢复，这里兜底）→ 重建
+                # 看门狗一：捕获线程异常死亡（理论上内部会自恢复，这里兜底）→ 重建
                 if not cap.is_alive():
                     log.warning("检测到音频捕获线程已停止，自动重启捕获")
-                    try:
-                        cap = AudioCapture(device=cap.device, out_queue=cap.queue)
-                        cap.start()
-                        self._cap = cap
-                        segmenter.reset()
-                    except Exception as e:
-                        log.warning("重启音频捕获失败: %s", e)
-                if self._speaker_id is not None:
+                    cap = self._recover_capture(cap, segmenter)
+                # 看门狗二：线程活着但设备已失效（如麦克风被拔掉）会一直重试同一个
+                # 死设备——连续失败到阈值后按配置重新解析设备，插回即自动恢复
+                elif cap.fail_streak >= 3 and time.time() - last_recover > 20:
+                    last_recover = time.time()
+                    log.warning("音频设备连续 %d 次捕获失败，尝试重新连接", cap.fail_streak)
+                    cap = self._recover_capture(cap, segmenter)
+                # 看门狗三：未指定设备名时跟随系统默认设备变化（插拔耳机/换默认麦克风）
+                if self._default_id is not None:
                     try:
                         import soundcard as sc
 
-                        current = sc.default_speaker().id
-                        if current != self._speaker_id:
+                        current = (sc.default_microphone() if self._default_kind == "mic"
+                                   else sc.default_speaker()).id
+                        if current != self._default_id:
+                            func = get_default_input if self._default_kind == "mic" else get_default_loopback
                             cap.stop()
-                            cap = AudioCapture(device=get_default_loopback())
+                            cap = AudioCapture(device=func(), out_queue=cap.queue)
                             cap.start()
                             self._cap = cap
-                            self._speaker_id = current
+                            self._default_id = current
                             segmenter.reset()
                             log.info("默认音频设备已变化，已自动切换监听源: %s", cap.device.name)
                     except Exception as e:
@@ -451,6 +493,42 @@ class Pipeline:
                 continue
             segmenter.feed(chunk)
         segmenter.flush()
+
+    def _recover_capture(self, cap, segmenter):
+        """按配置重新解析设备并重建捕获线程（配置设备不存在时回退到默认设备）。
+        返回可用的 AudioCapture（重建失败时原样返回旧对象）。"""
+        audio_cfg = self.cfg.get("audio") or {}
+        source = audio_cfg.get("source", "loopback")
+        device = None
+        fallback = False
+        try:
+            device = pick_device(audio_cfg.get("device_name"), source)
+        except Exception as e:
+            try:
+                # 配置的设备当前不存在（如麦克风被拔掉）：先回退到系统默认设备，
+                # 保证有声音可听；插回后下次重启监听/启动即恢复原选择
+                device = get_default_input() if source == "mic" else get_default_loopback()
+                fallback = True
+            except Exception as e2:
+                log.warning("重新解析音频设备失败: %s / %s", e, e2)
+                return cap
+        try:
+            cap.stop()
+            new_cap = AudioCapture(device=device, out_queue=cap.queue)
+            new_cap.start()
+        except Exception as e:
+            log.warning("重建音频捕获失败: %s", e)
+            return cap
+        self._cap = new_cap
+        segmenter.reset()
+        name = getattr(device, "name", str(device))
+        if fallback:
+            log.warning("原音频设备暂不可用，已回退到默认设备: %s", name)
+            self.on_subtitle({"kind": "info",
+                              "zh": tr("原音频设备不可用，已切换到：{name}").format(name=name)})
+        else:
+            log.info("音频捕获已重新连接: %s", name)
+        return new_cap
 
     def _source_lock(self):
         """源语言锁定：auto → None（自动检测），否则返回 whisper 语言码。"""
@@ -783,18 +861,30 @@ class MainApp:
         sub_cfg = self.cfg.get("subtitle") or {}
         ocr_cfg.setdefault("zh_color", sub_cfg.get("zh_color", "#FFE34D"))
         ocr_cfg.setdefault("src_color", sub_cfg.get("src_color", "#FFFFFF"))
-        self._ocr_popup = OcrResultPopup(
-            payload["src"], zh, payload["anchor"], ocr_cfg
-        )
-        self._ocr_popup.show()
+        popup = OcrResultPopup(payload["src"], zh, payload["anchor"], ocr_cfg)
+        old = getattr(self, "_ocr_popup", None)
+        if old is not None:
+            # duration_ms=0 的旧弹窗不会自动关闭；显示新弹窗前先收掉，避免叠一层
+            old.close()
+        self._ocr_popup = popup
+        popup.show()
 
     def _check_update(self, auto=False):
         """后台线程查询 GitHub Releases，结果经 bridge 回主线程显示。auto=True 为启动时的静默检查。"""
-        from app.updater import check_update
+        from app import updater
+
+        if auto and not updater.auto_check_due():
+            # 节流：频繁重启软件时不再每次都请求 GitHub（匿名限流 60 次/小时）；
+            # 手动点“检查更新”不受此限制
+            log.info("启动更新检查节流中（%.0f 小时内已检查过），跳过",
+                     updater.AUTO_CHECK_INTERVAL_S / 3600)
+            return
 
         def run():
-            result = check_update()
+            result = updater.check_update()
             result["auto"] = auto
+            if result.get("reachable"):
+                updater.mark_auto_checked()
             log.info("检查更新: %s", result)
             self.bridge.update_result.emit(result)
 
@@ -1020,7 +1110,7 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
             QMessageBox.critical(None, tr("错误"), str(e))
 
     def quit(self):
-        self.pipeline.stop()
+        self.pipeline.close()
         if self.hotkeys is not None:
             self.hotkeys.stop()
         if self.ocr_hotkeys is not None:

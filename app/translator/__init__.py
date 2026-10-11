@@ -95,3 +95,11 @@ class FallbackTranslator(Translator):
         if on_delta is not None and getattr(backend, "supports_stream", False):
             return backend.translate(text, src_lang, target, on_delta=on_delta)
         return backend.translate(text, src_lang, target)
+
+    def close(self):
+        """关闭所有后端连接（设置页改配置重建翻译链、程序退出时调用）。"""
+        for backend in self.backends:
+            try:
+                backend.close()
+            except Exception:
+                log.warning("关闭翻译后端 %s 失败", backend.name, exc_info=True)

@@ -1183,6 +1183,14 @@ class SettingsWindow(QMainWindow):
         staging_root = zip_path[:-4] + "_extract"
         shutil.rmtree(staging_root, ignore_errors=True)
         with zipfile.ZipFile(zip_path) as zf:
+            # 防路径穿越：任何成员都不能解压到目标目录之外
+            root = os.path.realpath(staging_root)
+            for name in zf.namelist():
+                member = os.path.realpath(os.path.join(staging_root, name))
+                if not (member == root or member.startswith(root + os.sep)):
+                    raise RuntimeError(
+                        tr("更新包结构异常：包含非法路径 {name}").format(name=name)
+                    )
             zf.extractall(staging_root)
         entries = os.listdir(staging_root)
         # 压缩包结构为 实时翻译字幕/…（单顶层目录）；容错处理平铺情况

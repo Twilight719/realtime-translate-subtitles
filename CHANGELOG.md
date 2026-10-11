@@ -6,6 +6,30 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.3.9] - 2026-10-11
+
+### 修复 / Fixed
+
+- **换音频设备后不用再重启软件**：插耳机、切蓝牙音箱或改系统默认设备时，软件会自动跟随切换到新的默认扬声器/麦克风；原来的设备被拔掉则自动回退到默认设备并提示。
+  No more restarting the app after changing audio devices: it now follows the system default speaker/microphone when you plug in headphones or switch devices, and falls back to the default device with a hint if the old one disappears.
+- **音频设备异常后不再"永远听不到声音"**：以前只有捕获线程彻底退出才会自动重连；某些设备切换会让捕获"活着但一直失败"，字幕从此停更。现在连续失败也会触发重建。
+  Fixed the app going deaf permanently after certain device glitches: capture threads that stayed alive but kept failing now trigger a rebuild, not just fully dead threads.
+- **切换翻译语言后译文被上一门语言带偏**：使用大模型翻译时，更换源语言/目标语言会清空对话上下文，不再把旧语言的句子喂给模型干扰译文。
+  Switching the translation language no longer skews results: the LLM backend now clears its conversation context when the source/target language changes.
+- **连续截图翻译时旧弹窗留在屏幕上**：新结果弹出时会先关掉上一个弹窗，不再叠着旧译文。
+  Consecutive screenshot translations no longer leave the previous popup on screen.
+- **连续两句译文相同时，历史行短暂显示错误**：上一句相同的译文会正确显示，不再停留在上上一句。
+  Fixed the history line briefly showing the wrong sentence when two consecutive translations are identical.
+- **改分辨率或换显示器后字幕条跑到屏幕外**：字幕窗位置会自动拉回屏幕可见范围，不用去改配置文件。
+  The subtitle bar is now clamped back into the visible screen area after a resolution or monitor change.
+
+### 优化 / Changed
+
+- **启动时的更新检查不再每次都联网**：同一台电脑 6 小时内只自动检查一次更新（GitHub 匿名接口有次数限制，频繁检查反而容易失败）；设置页手动点「检查更新」不受影响，随时可用。
+  The startup update check now runs at most once every 6 hours per machine to avoid GitHub rate limits; the manual "Check for updates" button in settings still works at any time.
+
+---
+
 ## [v1.3.8] - 2026-10-10
 
 ### 修复 / Fixed

@@ -45,6 +45,11 @@ class AudioCapture:
         self.queue = out_queue if out_queue is not None else queue.Queue(maxsize=200)
         self._stop = threading.Event()
         self._thread = None
+        self._fail_streak = 0  # 连续捕获失败次数（看门狗据此判断设备是否已失效）
+
+    @property
+    def fail_streak(self):
+        return self._fail_streak
 
     def start(self):
         self._stop.clear()
@@ -66,6 +71,7 @@ class AudioCapture:
             try:
                 with self.device.recorder(samplerate=SAMPLE_RATE, channels=2, blocksize=BLOCK_SIZE) as rec:
                     backoff = 1.0  # 录音器建立成功，重置退避
+                    self._fail_streak = 0
                     while not self._stop.is_set():
                         data = rec.record(numframes=BLOCK_SIZE)
                         chunk = data.mean(axis=1).astype(np.float32)
@@ -78,6 +84,7 @@ class AudioCapture:
             except Exception as e:
                 if self._stop.is_set():
                     break
+                self._fail_streak += 1
                 log.warning("音频捕获中断（%.0fs 后自动重连）: %s", backoff, e)
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, 15)
