@@ -748,15 +748,19 @@ def check_packaging():
             # 换包剪枝：把玩具 dist 当旧安装，CPU 包当新包 → 应清掉 nvidia 下的文件
             install = os.path.join(tmp, "install")
             shutil.copytree(dist, install)
+            # 断言基准必须是 realpath：compute_prune_list 内部一律 realpath（防清单里的
+            # 相对路径跳出去），而 mkdtemp 给的可能是 8.3 短名（CI 的 runneradmin 就是
+            # C:\Users\RUNNER~1\...）——长短名相减会算出 ../../../.. 这种爬升路径
+            install_real = os.path.realpath(install)
             staging_cpu = os.path.join(out, ".pkg_staging", "实时翻译字幕")
             files, dirs = compute_prune_list(staging_cpu, install)
-            rel = sorted(os.path.relpath(f, install).replace("\\", "/") for f in files)
+            rel = sorted(os.path.relpath(f, install_real).replace("\\", "/") for f in files)
             if rel != ["_internal/nvidia/cublas/bin/cublas64_12.dll",
                        "_internal/nvidia/cublas/bin/cublasLt64_12.dll"]:
                 fail(f"CUDA→CPU 待删清单异常: {rel}")
             if any(os.path.basename(d) == "models" for d in dirs):
                 fail("剪枝目录里不应出现 models（用户数据）")
-            if not dirs or os.path.relpath(dirs[-1], install).replace("\\", "/") != "_internal/nvidia":
+            if not dirs or os.path.relpath(dirs[-1], install_real).replace("\\", "/") != "_internal/nvidia":
                 fail(f"待删目录应由深到浅、含 _internal/nvidia: {dirs}")
             # 反向（CPU→CUDA）不该删任何东西
             files2, _ = compute_prune_list(dist, staging_cpu)
