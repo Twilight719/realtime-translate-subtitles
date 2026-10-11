@@ -426,6 +426,19 @@ MAP = {
     "热键 {hk} 被占用（是否有另一个实例在运行？），可右键托盘操作":
         "Hotkey {hk} is occupied (is another instance running?); use the tray right-click menu instead",
     "截图区域未识别到文字": "No text recognized in the selected area",
+    # 截图翻译的语言包提示（自动模式下中/日引擎判定，见 app/lang_detect.py）
+    "系统没有安装日语 OCR 语言包，日语截图会被认成形近汉字。"
+    "装上后即可自动识别日语：Windows 设置 → 时间和语言 → 语言和区域 → "
+    "添加语言 → 日语（勾选“语言包/OCR”）。":
+        "The Japanese OCR language pack is not installed, so Japanese text in "
+        "screenshots gets misread as look-alike Chinese characters. Install it to "
+        "recognize Japanese automatically: Windows Settings → Time & Language → "
+        "Language & region → Add a language → 日本語 (tick the language pack/OCR option).",
+    "未安装{lang}的 OCR 语言包，本次用系统默认语言识别；"
+    "可在 Windows 设置 → 时间和语言 → 语言和区域 中添加。":
+        "The {lang} OCR language pack is not installed; the system default language is "
+        "used this time. You can add it in Windows Settings → Time & Language → "
+        "Language & region.",
     "发现新版本 {latest}，点击此通知打开设置页下载更新":
         "New version {latest} available — click this notification to open Settings and "
         "download the update",

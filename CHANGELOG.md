@@ -6,6 +6,17 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.4.1] - 2026-10-11
+
+### 修复 / Fixed
+
+- **日语截图不再被认成"中日混合"**：源语言是「自动检测」时，之前一直用系统语言（中文）的识别引擎，日语假名会被认成形近汉字（"こんにちは"→"乙、今 日 00"）。现在会自动多试一遍日语引擎，按识别结果里的假名比例判断这是不是日语，是就改用日语引擎的结果、并按日语去翻译，译文自然对了。中文、英文截图的表现与之前完全一样。
+  Japanese screenshots are no longer garbled into mixed Chinese/Japanese: with source language set to Auto-detect the app used to always OCR with the system (Chinese) engine, which turns kana into look-alike kanji. It now also runs the Japanese engine and judges by kana ratio, so Japanese is recognized and translated as Japanese. Chinese and English screenshots behave exactly as before.
+- **没装日语语言包会提示一次**：Windows 里没装日语 OCR 语言包的用户，第一次截到日语会收到一条提示，写明到「设置 → 时间和语言 → 语言和区域」添加日语（勾选"语言包"）即可；看过一次不再打扰。
+  If the Windows Japanese language pack (OCR) isn't installed, you get a one-time hint telling you to add Japanese under Settings → Time & Language → Language & Region.
+
+---
+
 ## [v1.4.0] - 2026-10-11
 
 ### 新增 / Added

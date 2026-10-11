@@ -776,6 +776,7 @@ class MainApp:
         except Exception as e:
             log.warning("截图翻译热键注册失败: %s", e)
         self._snip = None
+        self._ocr_notices_shown = set()  # 截图翻译的同类提示本次运行只弹一次
 
         hotkey = self.cfg.get("hotkey", "alt+t")
         tip = (tr("按 {hk} 开始监听，右键托盘打开设置").format(hk=hotkey) if self.hotkeys
@@ -918,32 +919,57 @@ class MainApp:
         ).start()
 
     def _ocr_worker(self, path, rect, src_lang, target):
-        from app.ocr_tool import clean_cjk_spacing, ocr_image, pick_ocr_language
+        from app.ocr_tool import (LANG_NAMES, clean_cjk_spacing, ocr_image,
+                                  ocr_image_multi, pack_missing, pick_ocr_language)
 
         try:
-            lang_tag = None if src_lang == "auto" else pick_ocr_language(src_lang)
-            text = ocr_image(path, lang_tag)
+            notice, notice_once = "", ""
+            if src_lang == "auto":
+                # 自动检测：系统默认引擎 + 已装的中/日/韩/俄引擎各识别一遍再挑
+                # （中文引擎读日语会把假名认成形近汉字："こんにちは"→"乙 、今 日 00"）
+                text, det_lang = ocr_image_multi(path)
+                if pack_missing("ja"):
+                    # 没装日语引擎就认不出日语（中文引擎读日语时假名数为 0，判据够不着），
+                    # 所以只能按"装了才有得看"提示一次；是否真弹由主线程查重后决定
+                    notice = tr(
+                        "系统没有安装日语 OCR 语言包，日语截图会被认成形近汉字。"
+                        "装上后即可自动识别日语：Windows 设置 → 时间和语言 → 语言和区域 → "
+                        "添加语言 → 日语（勾选“语言包/OCR”）。"
+                    )
+                    notice_once = "ocr_ja_pack"
+            else:
+                lang_tag = pick_ocr_language(src_lang)
+                if lang_tag is None:
+                    notice = tr(
+                        "未安装{lang}的 OCR 语言包，本次用系统默认语言识别；"
+                        "可在 Windows 设置 → 时间和语言 → 语言和区域 中添加。"
+                    ).format(lang=tr(LANG_NAMES.get(src_lang, src_lang)))
+                text = ocr_image(path, lang_tag)
+                det_lang = src_lang
             lines = [ln.strip() for ln in text.splitlines() if ln.strip()]
             if not lines:
-                self.bridge.ocr_result.emit({"src": "", "zh": "", "anchor": rect})
+                self.bridge.ocr_result.emit({"src": "", "zh": "", "anchor": rect,
+                                             "notice": notice, "notice_once": notice_once})
                 return
             # 中日文按字符书写，多行直接拼接；空格分词语言用空格连接
-            sep = "" if src_lang in ("zh", "ja") else " "
+            sep = "" if (det_lang or "") in ("zh", "ja") else " "
             src = clean_cjk_spacing(sep.join(lines))
             zh = None
             if not re.search(r"[\w぀-ヿ一-鿿]", src, re.UNICODE):
                 # 纯符号/数字/噪点，没有可翻译的文字，直接显示原文
-                log.info("OCR [%s]: %s（无有效文字，跳过翻译）", src_lang, src)
-                self.bridge.ocr_result.emit({"src": src, "zh": src, "anchor": rect})
+                log.info("OCR [%s→%s]: %s（无有效文字，跳过翻译）",
+                         src_lang, det_lang or "未判定", src)
+                self.bridge.ocr_result.emit({"src": src, "zh": src, "anchor": rect,
+                                             "notice": notice, "notice_once": notice_once})
                 return
             try:
-                zh = self.pipeline.get_translator().translate(
-                    src, None if src_lang == "auto" else src_lang, target
-                )
+                # 判定出的语言要显式传下去：MyMemory/NLLB 收到 None 会按英语翻
+                zh = self.pipeline.get_translator().translate(src, det_lang, target)
             except Exception as e:
                 log.warning("截图翻译失败: %s", e)
-            log.info("OCR [%s]: %s → %s", src_lang, src, zh)
-            self.bridge.ocr_result.emit({"src": src, "zh": zh, "anchor": rect})
+            log.info("OCR [%s→%s]: %s → %s", src_lang, det_lang or "未判定", src, zh)
+            self.bridge.ocr_result.emit({"src": src, "zh": zh, "anchor": rect,
+                                         "notice": notice, "notice_once": notice_once})
         except Exception as e:
             log.exception("OCR 失败: %s", e)
         finally:
@@ -952,9 +978,32 @@ class MainApp:
             except OSError:
                 pass
 
+    def _show_ocr_notice(self, payload):
+        """截图翻译的提示（语言包缺失等）。
+
+        由 _ocr_worker（工作线程）随结果带过来、在主线程弹出：Qt 托盘不能跨线程碰。
+        notice_once 的提示只弹一次（状态记在 update_state.json，见 app/updater.py）；
+        其余同类提示本次运行只弹一次，避免连按热键被刷屏。
+        """
+        notice = payload.get("notice")
+        if not notice:
+            return
+        key = payload.get("notice_once")
+        if key:
+            from app import updater
+
+            if not updater.prompt_due(key):
+                return
+            updater.mark_prompted(key)
+        elif notice in self._ocr_notices_shown:
+            return
+        self._ocr_notices_shown.add(notice)
+        self.tray.showMessage(tr("实时翻译字幕"), notice, QSystemTrayIcon.Warning, 8000)
+
     def _show_ocr_result(self, payload):
         from app.ocr_tool import OcrResultPopup
 
+        self._show_ocr_notice(payload)
         if not payload.get("src"):
             self.tray.showMessage(
                 tr("实时翻译字幕"), tr("截图区域未识别到文字"),

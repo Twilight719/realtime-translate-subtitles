@@ -97,13 +97,22 @@ def mark_auto_checked():
     _write_state(last_check=time.time())
 
 
+def prompt_due(key):
+    """某个"只提示一次"的提示还没弹过？（状态存在 update_state.json 里，跨重启）"""
+    return not _read_state().get(key)
+
+
+def mark_prompted(key):
+    _write_state(**{key: True})
+
+
 def flavor_prompt_due():
     """是否该提示"可以切换到 CUDA 版"（只提示一次，用户不想换就不会再打扰）。"""
-    return not _read_state().get("flavor_prompted")
+    return prompt_due("flavor_prompted")
 
 
 def mark_flavor_prompted():
-    _write_state(flavor_prompted=True)
+    mark_prompted("flavor_prompted")
 
 
 def parse_version(text):

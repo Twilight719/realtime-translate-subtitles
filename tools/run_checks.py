@@ -1630,6 +1630,98 @@ def check_i18n():
     record("界面多语言覆盖（tr 字面量都已注册）", ok, "; ".join(detail))
 
 
+def check_ocr_lang():
+    """截图翻译的语言判定：脚本判据 + 多引擎选择（用例全是实机 OCR 的真实输出串）。
+
+    纯函数检查：不 import PyQt5/winsdk（那些在 app/ocr_tool.py 里），
+    CI 只装 requests 也能真跑，不会退化成"跳过"。
+    """
+    try:
+        from app.lang_detect import choose_ocr_text, detect_script
+    except ImportError as e:
+        record("截图语言判定（脚本判据 + 多引擎选择）", True,
+               f"跳过（本环境缺依赖 {getattr(e, 'name', e)}）")
+        return
+
+    ok, detail = True, []
+
+    def fail(msg):
+        nonlocal ok
+        ok = False
+        detail.append(msg)
+
+    # 判据：右侧全是 1100×70 渲染样图在 zh-Hans-CN / ja-JP 两个引擎上的真实输出
+    for want, text in [
+        ("ja", "こんにちは、今日はいい天気ですね。一緒に学校へ行きましょう。"),
+        (None, "乙 、 今 日 00 天 氦 ℃ 稳 。 一 緒 学 校 八 行 岂 0 0 。"),  # 中文引擎读日语（乱码）
+        ("ja", "コーヒーとケーキをください。"),
+        (None, "匕 一 亡 一 丰 < 芑 0 。"),                                # 中文引擎读片假名
+        (None, "東京大学医学部附属病院"),                                   # 纯汉字：中日同形，判不了
+        ("zh", "今天天气很好，我们一起去学校吧。"),
+        (None, "今 天 天 气 很 好 , 我 們 - 起 去 学 校 ロ 巴 。"),           # 日语引擎读中文
+        ("ja", "そうですね、わかりました"),
+        ("ko", "안녕하세요, 오늘 날씨가 좋네요."),
+        ("ru", "Привет, мир! Сегодня хорошая погода."),
+        # 证据不足一律不判（宁可不判也不误判）：短文本、纯汉字、拉丁、数字
+        (None, "はい"), (None, "今日は"), (None, "あ"), (None, ""),
+        (None, "Hello world"), (None, "2026-10-11 12:30"),
+    ]:
+        got = detect_script(text)
+        if got != want:
+            fail(f"detect_script({text[:20]!r}) = {got!r}，期望 {want!r}")
+
+    # 日文新字体与简体同形的字（学 国 会 体 医 来 万 与 …）不许当简体证据：
+    # 一旦把日语判成 zh，而目标语言也是 zh，翻译链会「源=目标直接回显」，日语原文会
+    # 被当成译文显示——静默且看起来像"翻译坏了"
+    if detect_script("学生が学校へ行きます") != "ja":
+        fail("含「学生/学校」的日语没判成日语——简体字表混进了中日同形字")
+    if detect_script("我們一起去看這部電影") == "zh":
+        fail("繁体中文被判成了简体（繁体该交给后端 auto，才有繁→简的机会）")
+
+    # 多引擎选择：{引擎标签: 文本} → (选中文本, 判定语言)
+    zh_ok, ja_ok = "今天天气很好，我们一起去学校吧。", "こんにちは、今日はいい天気ですね。"
+    zh_junk, ja_junk = "乙 、 今 日 00 天 氦 ℃ 稳 。", "今 天 天 气 很 好 , 我 們 - 起 去 学 校 ロ 巴 。"
+    for results, profile, want, note in [
+        ({"zh-Hans-CN": zh_ok, "ja": ja_junk}, "zh-Hans-CN", (zh_ok, "zh"), "中文串胜出"),
+        ({"zh-Hans-CN": zh_junk, "ja": ja_ok}, "zh-Hans-CN", (ja_ok, "ja"), "日语串胜出"),
+        ({"zh-Hans-CN": "東京大学医学部附属病院", "ja": "東京大学医学部附属病院"},
+         "zh-Hans-CN", ("東京大学医学部附属病院", None), "纯汉字→不判定、用默认引擎"),
+        ({"en-US": "hello"}, "en-US", ("hello", None), "拉丁→默认引擎"),
+        ({"zh-Hans-CN": "??", "ko": "안녕하세요"}, "zh-Hans-CN", ("안녕하세요", "ko"), "韩语胜出"),
+        ({}, None, ("", None), "全空"),
+    ]:
+        got = choose_ocr_text(results, profile)
+        if got != want:
+            fail(f"choose_ocr_text（{note}）= {got!r}，期望 {want!r}")
+
+    # 接线（防重构时接错线）：auto 分支必须真的走多引擎，判据模块必须顶层导入
+    sources = {}
+    for rel in ("main.py", "app/ocr_tool.py", "app/lang_detect.py"):
+        with open(os.path.join(ROOT, rel.replace("/", os.sep)), encoding="utf-8") as f:
+            sources[rel] = f.read()
+    if "ocr_image_multi" not in sources["main.py"]:
+        fail("main.py 的自动检测分支没接 ocr_image_multi")
+    if "def ocr_image_multi" not in sources["app/ocr_tool.py"]:
+        fail("app/ocr_tool.py 里没有 ocr_image_multi")
+    if "from .lang_detect import" not in sources["app/ocr_tool.py"]:
+        fail("ocr_tool.py 必须顶层导入 lang_detect（函数内导入会被 PyInstaller 漏收）")
+
+    # lang_detect 必须保持零第三方依赖，否则 CI（只装 requests）里本检查会静默跳过
+    import ast
+
+    for n in ast.walk(ast.parse(sources["app/lang_detect.py"])):
+        mods = []
+        if isinstance(n, ast.Import):
+            mods = [a.name for a in n.names]
+        elif isinstance(n, ast.ImportFrom) and not n.level:
+            mods = [n.module or ""]
+        for m in mods:
+            if m.split(".")[0] not in ("re", "__future__"):
+                fail(f"app/lang_detect.py 引入了第三方依赖 {m}（CI 上会没法跑）")
+
+    record("截图语言判定（脚本判据 + 多引擎选择）", ok, "; ".join(detail))
+
+
 # ---------------- 13. GUI 回归（子进程） ----------------
 
 GUI_TESTS = [
@@ -1678,7 +1770,7 @@ def main():
                check_live_caption, check_snapshot_pacing, check_config_template,
                check_flavor, check_packaging, check_download_channels,
                check_model_download, check_glossary, check_audio_level,
-               check_av_stub, check_i18n):
+               check_av_stub, check_i18n, check_ocr_lang):
         try:
             fn()
         except Exception:

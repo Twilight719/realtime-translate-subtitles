@@ -50,3 +50,29 @@ print("OCR result:", repr(text))
 os.remove(path)
 # Windows OCR 对中日文逐字加空格，比对前去掉空格（个别字误识别不影响链路验证）
 print("OCR_E2E_OK" if "你好世界" in text.replace(" ", "") else "OCR_E2E_FAIL")
+
+# ---- 自动检测模式：日语样图必须由日语引擎认出、并判定为 ja（没装日语语言包就跳过）----
+from app.lang_detect import analyze
+from app.ocr_tool import available_ocr_languages, ocr_image_multi
+
+avail = available_ocr_languages()
+print("available OCR languages:", avail)
+if not any(t.split("-")[0].lower() == "ja" for t in avail):
+    print("OCR_MULTI_SKIP（本机没装日语 OCR 语言包）")
+else:
+    # 中文引擎读日语会把假名认成形近汉字，所以样图必须用日文字体画
+    QFontDatabase.addApplicationFont("C:/Windows/Fonts/meiryo.ttc")
+    img2 = QImage(900, 90, QImage.Format_RGB32)
+    img2.fill(QColor("white"))
+    p2 = QPainter(img2)
+    p2.setPen(QColor("black"))
+    p2.setFont(QFont("Meiryo", 24))
+    p2.drawText(img2.rect(), 0, "こんにちは、今日はいい天気ですね。")
+    p2.end()
+    path2 = os.path.join(tempfile.gettempdir(), "rts_ocr_ja.png")
+    img2.save(path2, "PNG")
+    text2, lang2 = ocr_image_multi(path2)
+    os.remove(path2)
+    kana = analyze(text2)["kana"]
+    print("多引擎结果:", repr(text2), "| 判定:", lang2, "| 假名数:", kana)
+    print("OCR_MULTI_OK" if (lang2 == "ja" and kana >= 3) else "OCR_MULTI_FAIL")
