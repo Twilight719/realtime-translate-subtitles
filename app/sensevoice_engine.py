@@ -12,9 +12,12 @@ import time
 
 import numpy as np
 
+from .model_download import download_file_with_progress, report_stage
 from .paths import base_dir
 
 log = logging.getLogger("subtitle")
+
+LABEL = "极速识别模型"  # 进度提示里的名字（界面层再翻译）
 
 MODEL_REPO = "csukuangfj/sherpa-onnx-sense-voice-zh-en-ja-ko-yue-2024-07-17"
 MODEL_DIR = os.path.join(base_dir(), "models", "sensevoice")
@@ -31,6 +34,7 @@ class SenseVoiceTranscriber:
 
     def __init__(self, num_threads=2):
         self._ensure_model()
+        report_stage("load", LABEL)
         import sherpa_onnx  # 延迟导入：用 whisper 引擎时不加载
 
         self.recognizer = sherpa_onnx.OfflineRecognizer.from_sense_voice(
@@ -42,6 +46,7 @@ class SenseVoiceTranscriber:
             debug=False,
         )
         log.info("SenseVoice 引擎已加载（极速模式，CPU）")
+        report_stage("ready", LABEL)
 
     @staticmethod
     def _ensure_model():
@@ -49,14 +54,13 @@ class SenseVoiceTranscriber:
                    if not os.path.exists(os.path.join(MODEL_DIR, f))]
         if not missing:
             return
-        from huggingface_hub import hf_hub_download
 
         os.makedirs(MODEL_DIR, exist_ok=True)
         for fn in missing:
             for attempt in (1, 2):
                 try:
                     log.info("下载 SenseVoice 模型文件 %s（共约 230MB，仅首次）", fn)
-                    hf_hub_download(MODEL_REPO, fn, local_dir=MODEL_DIR)
+                    download_file_with_progress(MODEL_REPO, fn, MODEL_DIR, LABEL)
                     break
                 except Exception:
                     if attempt == 2:

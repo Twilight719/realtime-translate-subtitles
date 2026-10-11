@@ -235,6 +235,23 @@ MAP = {
     "上移": "Move Up",
     "下移": "Move Down",
     "NLLB 运行设备": "NLLB Device",
+    "音频电平": "Audio Level",
+    "未监听": "Not listening",
+    "检测到人声": "Speech detected",
+    "静音": "Silent",
+    "术语表（自定义词典）": "Glossary (Custom Dictionary)",
+    "每行一条，用等号分隔原文与译文，如：\n原神=Genshin Impact\n元素爆发=Elemental Burst":
+        "One entry per line, source=target, e.g.:\n原神=Genshin Impact\n元素爆发=Elemental Burst",
+    "只对“大模型 API”后端生效：有道 / Google / MyMemory / 本地 NLLB 用不了自定义词典。"
+    "词条原文还会作为识别提示词（whisper 引擎有效），帮识别把专名拼对。":
+        "Only applies to the \"LLM API\" backend — Youdao / Google / MyMemory / local NLLB "
+        "cannot use a custom dictionary. The source terms are also fed to recognition as a "
+        "prompt (whisper engine only), helping it spell proper nouns correctly.",
+    "术语表：每行一条“原文=译文”，如“原神=Genshin Impact”。只对“大模型 API”后端生效（有道 / Google / MyMemory / 本地 NLLB 吃不了词典）；词条原文会同时作为识别提示词，帮 whisper 把专名拼对。":
+        "Glossary: one entry per line, source=target, e.g. \"原神=Genshin Impact\". Only the "
+        "\"LLM API\" backend honours it (Youdao / Google / MyMemory / local NLLB cannot use a "
+        "dictionary); the source terms are also used as a recognition prompt to help whisper "
+        "spell proper nouns correctly.",
     "大模型 API（选择“大模型 API”后端时生效）":
         "LLM API (applies when the \"LLM API\" backend is selected)",
     "模型名": "Model Name",
@@ -314,10 +331,12 @@ MAP = {
     "已是最新版本（v{ver}）": "Already up to date (v{ver})",
     "准备下载…": "Preparing download…",
     "下载更新 {latest}": "Downloading Update {latest}",
-    "GitHub 直连": "GitHub direct",
-    "镜像 {n}": "Mirror {n}",
-    "正在下载（{channel}，第 {idx}/{count} 个通道）：\n{done:.0f} / {total:.0f} MB":
-        "Downloading ({channel}, channel {idx}/{count}):\n{done:.0f} / {total:.0f} MB",
+    "正在测速下载通道…": "Measuring download channel speed…",
+    "正在通过 {name} 下载…": "Downloading via {name}…",
+    "{n:.0f} KB/s": "{n:.0f} KB/s",
+    "{n:.1f} MB/s": "{n:.1f} MB/s",
+    "正在下载（{channel}）：\n{done:.0f} / {total:.0f} MB（{pct:.0f}%）":
+        "Downloading ({channel}):\n{done:.0f} / {total:.0f} MB ({pct:.0f}%)",
     "正在下载（{channel}）：{done:.0f} MB": "Downloading ({channel}): {done:.0f} MB",
     "下载失败": "Download Failed",
     "{info}\n\n可以点“检查更新 → 打开下载页面”用浏览器手动下载。":
@@ -336,6 +355,46 @@ MAP = {
     "热键无效": "Invalid Hotkey",
     "热键“{hk}”无法识别（{err}），本次保留原热键 {old}。":
         "Hotkey \"{hk}\" is not recognized ({err}); keeping the previous hotkey {old}.",
+
+    # ---------- 包型（CPU/CUDA）与换包（规划 §1.2） ----------
+    "安装包": "Package",
+    "CUDA 完整版": "CUDA build",
+    "CPU 精简版": "CPU build",
+    "当前为{name}（更新包{size}）": "Currently {name} (update package {size})",
+    "切换到 CUDA 版（{size}）": "Switch to the CUDA build ({size})",
+    "切换到 CPU 精简版（{size}）": "Switch to the CPU build ({size})",
+    "正在获取下载地址…": "Fetching download address…",
+    "切换安装包": "Switch Package",
+    "切换失败": "Switch Failed",
+    "缺少安装包": "Package Missing",
+    "下载{pack}": "Downloading {pack}",
+    "最新版本 {latest} 已发布（当前 v{ver}）。\n\n本次将下载{pack}。\n\n“软件内下载”会优先走国内加速镜像，全部失败才用 GitHub 直连；\n下载完成后自动替换旧文件并重启（你的配置和已下载模型都会保留）。":
+        "Version {latest} is available (you have v{ver}).\n\nThis will download {pack}.\n\n"
+        "In-app download tries China-friendly mirrors first and only falls back to GitHub direct;\n"
+        "when done it replaces the old files and restarts automatically "
+        "(your config and downloaded models are kept).",
+    "将下载并安装{nname}（{size}），完成后自动重启。\n你的配置和已下载的模型都会保留。\n\n{note}":
+        "Will download and install {nname} ({size}), then restart automatically.\n"
+        "Your config and downloaded models are kept.\n\n{note}",
+    "切换后可在“识别模型”里把设备设为 cuda 以启用 GPU 加速。":
+        "After switching, set the device to cuda under \"Recognition Model\" to enable GPU acceleration.",
+    "切换后程序目录会删掉 CUDA 运行库，节省约 600 MB 磁盘。":
+        "After switching, the CUDA runtime libraries are removed from the program folder, "
+        "saving about 600 MB of disk space.",
+    "本次发布缺少{name}，请稍后重试或到下载页手动下载":
+        "This release is missing {name}; try again later or download it manually from the releases page",
+    "{err}\n\n现在打开下载页面吗？": "{err}\n\nOpen the download page now?",
+    "更新包结构异常：包含非法路径 {name}": "Invalid update package: illegal path {name}",
+    "检测到 NVIDIA 显卡，但当前安装的是 CPU 精简版":
+        "An NVIDIA GPU was detected, but the CPU build is installed",
+    "精简版不含 CUDA 运行库，识别已自动改用 CPU（比 GPU 慢不少）。\n可以换成 CUDA 完整版（约 640 MB，软件内下载）：点下面的按钮，在设置页“检查更新”处点“切换到 CUDA 版”。":
+        "The CPU build has no CUDA runtime, so recognition stays on CPU (much slower than GPU).\n"
+        "You can switch to the CUDA build (about 640 MB, downloaded in-app): click the button below, "
+        "then click \"Switch to the CUDA build\" under \"Check for Updates\" in Settings.",
+    "去设置页切换": "Open Settings",
+    "以后再说": "Not Now",
+    "原音频设备不可用，已切换到：{name}":
+        "The previous audio device is unavailable; switched to: {name}",
 
     # ---------- tray.py ----------
     "实时翻译字幕（已停止）": "Realtime Translate Subtitles (Stopped)",
@@ -389,6 +448,16 @@ MAP = {
     "正在加载模型…（首次运行需下载识别模型约 460MB，请保持网络畅通）":
         "Loading models… (first run downloads ~460MB of recognition models — "
         "please keep the network connected)",
+    # 模型下载三段状态（规划 §3）：{name} 取 "语音识别模型"/"极速识别模型"/"离线翻译模型"
+    # （与侧边栏的"识别模型"是两回事，故意用不同措辞避免撞键）
+    "语音识别模型": "speech recognition model",
+    "极速识别模型": "fast recognition model",
+    "离线翻译模型": "offline translation model",
+    "正在下载{name}：{done:.0f}/{total:.0f} MB（{pct:.0f}%）":
+        "Downloading the {name}: {done:.0f}/{total:.0f} MB ({pct:.0f}%)",
+    "正在下载{name}：{done:.0f} MB": "Downloading the {name}: {done:.0f} MB",
+    "正在加载{name}…": "Loading the {name}…",
+    "{name}已就绪": "{name} ready",
     "错误": "Error",
 }
 

@@ -11,7 +11,9 @@ class Translator:
     """所有翻译后端实现此接口。"""
 
     name = "base"
-
+    # 译文是否依赖别的请求（如大模型带上一句做上下文）。为 True 的后端不参与
+    # FallbackTranslator 的结果缓存：同一句原文在不同上下文里可能该译得不一样
+    context_sensitive = False
     def translate(self, text, src_lang, target="zh"):
         """text → target 语言。src_lang 为 whisper 语言码（如 'en'/'ja'），可为 None；
         target 为目标语言码（zh/en/ja/ko/ru）。

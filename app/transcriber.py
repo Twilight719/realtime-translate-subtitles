@@ -5,14 +5,24 @@ import logging
 import numpy as np
 from faster_whisper import WhisperModel  # 顶层导入：避免多线程并发加载原生扩展导致段错误
 
+from .model_download import ensure_whisper_model, report_stage
+
 log = logging.getLogger("subtitle")
+
+LABEL = "语音识别模型"  # 进度提示里的名字（界面层再翻译；与侧边栏"识别模型"区分开，避免撞 i18n 键）
 
 
 class Transcriber:
     def __init__(self, model_size="small", device="cuda", compute_type="float16", beam_size=1):
-        self.model = self._load_with_fallback(model_size, device, compute_type)
+        # 首次使用要下载约 460MB：先在带进度的情况下下好，再交给 WhisperModel 加载。
+        # 拿到本地目录就直接用（它见到目录不会再去下载，缓存命中也不会重下）；
+        # 拿不到（下载失败等）就照旧把档位名交给 WhisperModel，由它自己处理
+        prepared = ensure_whisper_model(model_size, LABEL)
+        report_stage("load", LABEL)
+        self.model = self._load_with_fallback(prepared or model_size, device, compute_type)
         self.beam_size = beam_size
         self._warmup()
+        report_stage("ready", LABEL)
 
     def _warmup(self):
         """加载后跑一遍静音识别：提前完成 CUDA 内核编译与自动调优，

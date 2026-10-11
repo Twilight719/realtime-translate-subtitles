@@ -43,13 +43,13 @@ jobs:
           test -f "dist/实时翻译字幕/实时翻译字幕.exe"
           ls -lh "dist/实时翻译字幕/实时翻译字幕.exe"
 
-      - name: Package zip
+      # 一次构建、派生两份产物：CPU 包（默认，无 CUDA 运行库）与 CUDA 完整包。
+      # 脚本会校验"CPU 清单 ⊆ CUDA 清单、公共文件逐字节相同"，不通过就退出 1 → 整体不发版。
+      - name: Package both flavors (CPU / CUDA)
         if: startsWith(github.ref, 'refs/tags/')
-        shell: pwsh
-        run: |
-          $tag = "${{ github.ref_name }}"
-          Compress-Archive -Path "dist\实时翻译字幕" -DestinationPath "realtime-translate-subtitles-$tag-windows-x64.zip"
-          (Get-Item "realtime-translate-subtitles-$tag-windows-x64.zip").Length
+        env:
+          PYTHONIOENCODING: utf-8
+        run: python tools/package_release.py --tag "${{ github.ref_name }}" --out .
 
       - name: Extract release notes from CHANGELOG
         if: startsWith(github.ref, 'refs/tags/')
@@ -63,4 +63,6 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: ${{ github.ref_name }}
           body_path: notes.md
-          files: realtime-translate-subtitles-${{ github.ref_name }}-windows-x64.zip
+          files: |
+            realtime-translate-subtitles-${{ github.ref_name }}-windows-x64.zip
+            realtime-translate-subtitles-${{ github.ref_name }}-windows-x64-cuda.zip

@@ -17,6 +17,10 @@ update_state.json
 build/
 dist/
 
+# 打包脚本产物（体积/大小报告与中间目录）
+release_sizes.json
+.pkg_staging/
+
 # 测试调试截图
 tools/screen_dbg.png
 tools/ocr_modes.png

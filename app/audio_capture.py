@@ -46,10 +46,21 @@ class AudioCapture:
         self._stop = threading.Event()
         self._thread = None
         self._fail_streak = 0  # 连续捕获失败次数（看门狗据此判断设备是否已失效）
+        self._level = 0.0  # 最近音量电平（见 last_level）
 
     @property
     def fail_streak(self):
         return self._fail_streak
+
+    @property
+    def last_level(self):
+        """最近的音量电平（0~1 峰值保持）。
+
+        给设置页的电平条用（规划 §5.2）：**由捕获线程自己记**，界面只读，
+        不从队列里取（取走就是抢主流水线的音频帧）。纯 float 赋值/读取，
+        跨线程读是安全的。
+        """
+        return self._level
 
     def start(self):
         self._stop.clear()
@@ -77,6 +88,10 @@ class AudioCapture:
                         chunk = data.mean(axis=1).astype(np.float32)
                         if len(chunk) < BLOCK_SIZE:
                             chunk = np.pad(chunk, (0, BLOCK_SIZE - len(chunk)))
+                        # 电平：峰值 + 缓降。界面刷新（~150ms）比音频块（32ms）慢得多，
+                        # 不做保持的话界面看到的只是随机一帧，条会乱跳
+                        peak = float(np.abs(chunk).max())
+                        self._level = peak if peak > self._level else self._level * 0.85
                         try:
                             self.queue.put_nowait(chunk)
                         except queue.Full:
@@ -85,6 +100,7 @@ class AudioCapture:
                 if self._stop.is_set():
                     break
                 self._fail_streak += 1
+                self._level = 0.0  # 捕获断了，电平条不应该继续显示有声音
                 log.warning("音频捕获中断（%.0fs 后自动重连）: %s", backoff, e)
                 self._stop.wait(backoff)
                 backoff = min(backoff * 2, 15)

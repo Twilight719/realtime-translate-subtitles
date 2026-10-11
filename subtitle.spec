@@ -14,9 +14,11 @@ site_packages = sysconfig.get_paths()["purelib"]
 
 # NVIDIA cuBLAS DLL：ctranslate2 GPU 推理必需，PyInstaller 不会自动收集。
 # cuDNN 不打：ctranslate2 包自带 cudnn64_9.dll（重复打包白白大 700MB+）
+# cuda_nvrtc 不打：178 MB。2026-10-11 实测（隐藏 .venv 里的 nvidia/cuda_nvrtc 后
+#   跑 whisper small fp16 GPU 识别正常）确认不是运行时必需。
 binaries = []
 for d in glob.glob(os.path.join(site_packages, "nvidia", "*", "bin")):
-    if "cudnn" in d.lower():
+    if "cudnn" in d.lower() or "nvrtc" in d.lower():
         continue
     for dll in glob.glob(os.path.join(d, "*.dll")):
         binaries.append((dll, os.path.relpath(d, site_packages)))
@@ -50,8 +52,15 @@ a = Analysis(
            "winsdk.windows.storage", "winsdk.windows.globalization"]
     ),
     hookspath=[],
-    runtime_hooks=["tools/pyi_rth_preload.py"],  # 须在 PyQt5 rthook 之前预加载原生库
-    excludes=[],
+    # pyi_rth_preload 须在 PyQt5 rthook 之前预加载原生库；pyi_rth_no_av 用空壳顶掉 PyAV
+    runtime_hooks=["tools/pyi_rth_preload.py", "tools/pyi_rth_no_av.py"],
+    # hf_xet：应用已设 HF_HUB_DISABLE_XET=1（见 sensevoice/whisper 的下载路径），
+    # huggingface_hub 找不到它会优雅降级，省 8.9 MB
+    # av：本应用不解码音频文件，只被 faster_whisper 导入期引用一次，
+    # 由 pyi_rth_no_av.py 顶成空壳，省掉 av + av.libs 约 65 MB
+    #   （2026-10-11 实测 65.5 MiB = av 2.9 + av.libs 62.6；规划里的 129.4 MB
+    #    出自旧构建——那份包里混了两代 av 库 avcodec-62 与 -63，各算了一遍）
+    excludes=["hf_xet", "av"],
     noarchive=False,
 )
 pyz = PYZ(a.pure)

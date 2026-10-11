@@ -1,7 +1,9 @@
 """翻译后端工厂与故障回退链（带熔断：失败的后端冷却一段时间不再重试）。"""
 
 import logging
+import threading
 import time
+from collections import OrderedDict
 
 from .base import Translator, TranslationTextError
 from .google_web import GoogleWebTranslator
@@ -29,8 +31,11 @@ def build_chain(cfg):
             elif name == "nllb":
                 backends.append(NllbTranslator(device=cfg.get("nllb_device", "cpu")))
             elif name == "llm_api":
-                llm = cfg.get("llm_api", {})
+                llm = dict(cfg.get("llm_api") or {})
                 if llm.get("api_key"):
+                    # 术语表挂在 translator 下（识别提示词与设置页都用同一份），
+                    # 用 setdefault 传进去：用户真写进 llm_api 里也照收，且不会撞关键字
+                    llm.setdefault("glossary", cfg.get("glossary"))
                     backends.append(LlmApiTranslator(**llm))
                 else:
                     log.warning("llm_api 未配置 api_key，跳过")
@@ -44,9 +49,29 @@ def build_chain(cfg):
 class FallbackTranslator(Translator):
     name = "fallback"
 
+    # 会话级结果缓存的容量（条）。实时字幕里同一条文本反复出现的概率很高
+    # （短句、重复台词、滚动区回退），命中一次就省一次在线请求（规划 §2.2 a）
+    CACHE_SIZE = 256
+
     def __init__(self, backends):
         self.backends = backends
         self._failed_at = {}  # backend -> 上次失败时间戳
+        self._cache = OrderedDict()  # (文本, 源语言, 目标语言, 后端名) -> 译文（LRU）
+        self._cache_lock = threading.Lock()
+
+    def _cache_get(self, key):
+        with self._cache_lock:
+            if key in self._cache:
+                self._cache.move_to_end(key)
+                return self._cache[key]
+        return None
+
+    def _cache_put(self, key, value):
+        with self._cache_lock:
+            self._cache[key] = value
+            self._cache.move_to_end(key)
+            while len(self._cache) > self.CACHE_SIZE:
+                self._cache.popitem(last=False)
 
     def translate(self, text, src_lang, target="zh", on_delta=None):
         """on_delta(累计译文) 非 None 时，支持流式的后端会逐段回调（观感更实时）。"""
@@ -55,6 +80,17 @@ class FallbackTranslator(Translator):
         now = time.time()
         last_err = None
         tried_any = False
+        # 缓存只在“首选后端（第一个没在冷却的）”上生效：同一句原文交给别的后端
+        # 翻出来可能不一样，混着用会让重复出现的句子前后不一致
+        first = next((b for b in self.backends
+                      if now - self._failed_at.get(b, 0) >= COOLDOWN_S), None)
+        if first is not None and not getattr(first, "context_sensitive", False):
+            hit = self._cache_get((text, src_lang or "", target, first.name))
+            if hit is not None:
+                if on_delta is not None:
+                    on_delta(hit)  # 流式调用方也按“一次到齐”的语义收到译文
+                log.debug("翻译缓存命中（%s）: %s", first.name, text)
+                return hit
         for backend in self.backends:
             failed_at = self._failed_at.get(backend, 0)
             if now - failed_at < COOLDOWN_S:
@@ -63,6 +99,8 @@ class FallbackTranslator(Translator):
             try:
                 result = self._call(backend, text, src_lang, target, on_delta)
                 if result and str(result).strip():
+                    if backend is first and not getattr(backend, "context_sensitive", False):
+                        self._cache_put((text, src_lang or "", target, backend.name), result)
                     return result
                 # 空结果不等于成功：继续下一个后端，否则字幕只会显示空白
                 log.info("翻译后端 %s 返回空结果，换下一个后端", backend.name)

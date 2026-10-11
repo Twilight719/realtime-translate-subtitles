@@ -7,6 +7,7 @@
 import logging
 import os
 
+from ..model_download import download_repo_with_progress, report_stage
 from ..paths import base_dir
 from .base import Translator
 
@@ -14,6 +15,7 @@ log = logging.getLogger("subtitle.translator.nllb")
 
 MODEL_ID = "JustFrederik/nllb-200-distilled-600M-ct2-int8"
 MODEL_DIR = os.path.join(base_dir(), "models", "nllb-600m-int8")
+LABEL = "离线翻译模型"  # 进度提示里的名字（界面层再翻译）
 
 # whisper 语言码 → NLLB 语言码（常用语种，未列出的走 flores-200 同构规则兜底）
 WHISPER_TO_NLLB = {
@@ -28,16 +30,14 @@ def _ensure_model(model_dir=MODEL_DIR):
     if not os.path.exists(os.path.join(model_dir, "model.bin")):
         import time
 
-        from huggingface_hub import snapshot_download
-
         log.info("首次使用离线翻译，需下载 NLLB 模型（约 600MB），请保持网络畅通...")
         try:
-            snapshot_download(MODEL_ID, local_dir=model_dir)
+            download_repo_with_progress(MODEL_ID, model_dir, LABEL)
         except Exception:
             # 镜像偶发失败：记完整堆栈，5 秒后自动重试一次；再失败交给上层熔断
             log.exception("NLLB 模型下载失败，5 秒后重试一次")
             time.sleep(5)
-            snapshot_download(MODEL_ID, local_dir=model_dir)
+            download_repo_with_progress(MODEL_ID, model_dir, LABEL)
     return model_dir
 
 
@@ -56,6 +56,7 @@ class NllbTranslator(Translator):
         import sentencepiece
 
         model_dir = _ensure_model()
+        report_stage("load", LABEL)
         self._translator = ctranslate2.Translator(
             model_dir, device=self.device,
             compute_type="int8" if self.device == "cpu" else "float16",
@@ -64,6 +65,7 @@ class NllbTranslator(Translator):
         with open(os.path.join(model_dir, "sentencepiece.bpe.model"), "rb") as f:
             self._sp = sentencepiece.SentencePieceProcessor(model_proto=f.read())
         log.info("NLLB 离线翻译模型已加载")
+        report_stage("ready", LABEL)
 
     def translate(self, text, src_lang, target="zh"):
         self._load()

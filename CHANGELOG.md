@@ -6,6 +6,32 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.4.0] - 2026-10-11
+
+### 新增 / Added
+
+- **安装包大瘦身，按需选择**：以前只有一个约 750 MB 的安装包，其中约 600 MB 是 NVIDIA 运行库——没有 N 卡的用户下了也用不上。现在拆成两个：**标准包（约 110 MB，默认选这个）** 和 **CUDA 包（约 640 MB）**。两个包功能完全一样，CUDA 包只是多带显卡运行库，让有 N 卡的用户能开 GPU 加速；软件内更新会自动下载你当前装的那一个，不会让你白下 600 MB。
+  Much smaller downloads: the single ~750 MB package (about 600 MB of which was NVIDIA runtime libraries many users can't use) is now split into a **standard build (~110 MB, default)** and a **CUDA build (~640 MB)**. Both contain the same program; in-app updates always fetch the flavor you already have.
+- **装了标准包想改用显卡加速？设置页一键换包**：设置 → 主页 → 「检查更新」处新增「切换到 CUDA 版」按钮，软件内下载并自动替换，你的配置与已下载的模型都保留。有 N 卡却装着标准包的用户，首次启动会提示一次。
+  You can now switch to the CUDA build straight from Settings → Home → "Check for Updates" (your config and downloaded models are kept). Users with an NVIDIA GPU running the standard build get a one-time hint on startup.
+- **术语表（自定义词典）**：设置 → 翻译服务，每行一条「原文=译文」，例如 `原神=Genshin Impact`。大模型后端会强制按你的译法翻译；词条原文还会作为识别提示词，帮识别把专名拼对。只有「大模型 API」后端支持词典——有道 / Google / MyMemory / 本地 NLLB 用不了。
+  Glossary (custom dictionary) under Settings → Translation: one entry per line as `source=target`. The LLM backend is required to use your wording, and the source terms double as a recognition prompt to help spell proper nouns. Only the "LLM API" backend supports it.
+- **模型下载有进度了**：首次使用下载识别/翻译模型时，字幕条与设置页会显示「下载中 x/y MB（z%）→ 加载中 → 就绪」，不用再对着转圈干等，也能看出是网慢还是卡住。
+  First-run model downloads now show progress — downloading x/y MB (z%) → loading → ready — in both the subtitle bar and Settings.
+
+### 优化 / Changed
+
+- **软件内下载更新不再"特别慢"**：下载前先给几个镜像并发测速、挑最快的；下载中途速度掉到几十 KB/s 会自动换通道，已下的部分接着下（断点续传）；实在都慢就退回实测最快的一条走到底。完整性校验（sha256）照旧。
+  In-app update downloads no longer crawl: mirrors are speed-tested first, a slow channel is swapped automatically, and downloads resume where they left off. sha256 verification is unchanged.
+- **在线翻译请求量减少约六成**：同一句话不再被翻两遍（边滚动边翻一次、定稿后又翻一次的老问题）。10 分钟对话的在线请求从约 840 次降到约 340 次，更不容易触发限流，也更省流量；字幕出现的时机不变。
+  About 60% fewer online translation requests — the same sentence is no longer translated twice — so rate limits are far less likely. Subtitles appear just as quickly.
+- **"听不到声音"时能一眼看出问题在哪**：设置 → 主页新增实时音频电平条与「检测到人声 / 静音 / 未监听」状态，一眼分清是设备没抓到声音，还是没判到人声（后者把识别灵敏度阈值调低一点即可）。
+  A live audio-level bar and a speech/silent state in Settings → Home show at a glance whether audio is being captured at all.
+- **包体再小约 65 MB**：移除了程序用不到的一个音频解码库（声音直接从系统里抓，不需要解码音频文件）。
+  About 65 MB smaller still: an audio-decoding library the app never uses has been removed.
+
+---
+
 ## [v1.3.9] - 2026-10-11
 
 ### 修复 / Fixed

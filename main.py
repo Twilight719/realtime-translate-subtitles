@@ -23,11 +23,24 @@ from collections import deque
 
 from ruamel.yaml import YAML
 
+from app import model_download
 from app.paths import base_dir, resource_path
 
 BASE_DIR = base_dir()  # 打包后为 exe 所在目录，开发时为项目根目录
 CONFIG_PATH = os.path.join(BASE_DIR, "config.yaml")
 LOG_PATH = os.path.join(BASE_DIR, "app.log")
+
+# 实时快照间隔的自适应上限（秒）：识别+翻译一次要多久，快照间隔就至少拉多长
+# （规划 §2.2 c，下限是配置里的 vad.partial_interval_s）
+PARTIAL_INTERVAL_MAX_S = 2.0
+
+
+def partial_interval_for(elapsed, base):
+    """按上一次「识别+翻译」的实测耗时算下一次快照间隔（规划 §2.2 c）。
+
+    快的时候保持配置值（跟手性、首字延迟都不变），慢的时候拉到最多 2 秒——
+    生成再多快照也只会被丢掉，白白占用识别算力。"""
+    return min(PARTIAL_INTERVAL_MAX_S, max(base, elapsed * 1.2))
 
 # HuggingFace 直连不通时走国内镜像（须在 huggingface_hub 被导入前设置）
 os.environ.setdefault("HF_ENDPOINT", "https://hf-mirror.com")
@@ -85,6 +98,7 @@ from app.live_caption import LiveCaptionState
 from app.subtitle_window import SubtitleWindow
 from app.transcriber import Transcriber
 from app.translator import build_chain
+from app.translator import glossary
 from app.tray import TrayIcon
 from app.vad import VadSegmenter
 
@@ -114,7 +128,7 @@ audio:
 whisper:
   engine: whisper          # whisper = 精准（可选 large-v3-turbo）；sensevoice = 极速（CPU 即可，约 30 倍实时速度，仅支持 中/英/日/韩/粤）
   model_size: small        # tiny / base / small / medium / large-v3-turbo（最准，首次需下载约 1.6GB）
-  device: cuda             # cuda / cpu
+  device: cuda             # cuda / cpu（CPU 精简版安装包不含 CUDA 运行库，选 cuda 会自动降级为 CPU）
   compute_type: float16    # cuda 用 float16 或 int8_float16（更快更省显存）；cpu 建议 int8
   beam_size: 1             # 1 = 最快；提到 3~5 质量略好但更慢
   prompt:                  # 识别提示词（可选）：作品名/角色名/术语，如“原神 派蒙 元素爆发”，专名更准
@@ -124,7 +138,8 @@ vad:
   min_speech_ms: 250
   min_silence_ms: 250        # 停顿多久判定一句结束（调小出字幕更快，太小会把长句切断）
   max_segment_s: 10        # 连续说话时每段最长秒数（强制切段）
-  partial_interval_s: 0.8  # 说话过程中每隔多少秒出一次实时快照字幕（调小更跟手，翻译请求更频繁）
+  partial_interval_s: 0.8  # 说话过程中每隔多少秒出一次实时快照字幕
+                           # （调小更跟手；识别/翻译跟不上时会自动放慢，最多 2 秒）
 
 language:
   source: auto             # 源语言：auto=自动检测；看单一语言视频可锁定 zh/en/ja/ko/ru，识别更快更准
@@ -138,6 +153,10 @@ translator:
   - nllb
   - mymemory
   nllb_device: cpu            # 本地 NLLB 默认 CPU，不占显存
+  glossary: []                # 术语表（自定义词典）：每行一条“原文=译文”，如
+                              #   - 原神=Genshin Impact
+                              # 只有“大模型 API”后端翻译时会遵守；有道/Google/MyMemory/NLLB 不支持。
+                              # 词条原文还会作为识别提示词喂给 whisper（专名更准），留空则完全不影响
   llm_api:
     base_url: https://api.deepseek.com/v1
     api_key: ""             # 填 key 后在 order 里加 llm_api 即启用
@@ -174,10 +193,32 @@ hotkey_ocr: ctrl+alt+r     # 截图翻译快捷键：框选屏幕区域 → OCR 
 """
 
 
+def default_config_text():
+    """首次运行写出的默认配置。
+
+    识别设备按本机实际能力选：CPU 小包（或没有 N 卡驱动）默认写 cpu + int8，
+    避免"默认 cuda 但包里没有 CUDA 库"时每次启动都要走一遍加载失败降级。
+    """
+    try:
+        from app import flavor as flavor_mod
+
+        if flavor_mod.has_cuda_libs() and flavor_mod.nvcuda_available():
+            return DEFAULT_CONFIG
+    except Exception:  # 打包异常等情况下退回保守默认
+        log.warning("检测 CUDA 可用性失败，默认配置按 CPU 生成", exc_info=True)
+    text = DEFAULT_CONFIG.replace("device: cuda", "device: cpu", 1)
+    text = text.replace("compute_type: float16", "compute_type: int8", 1)
+    if "device: cpu" not in text:
+        # 模板改了措辞导致替换失配：宁可原样生成并留下告警，也别悄悄给错默认值
+        log.warning("默认配置模板未匹配到 device: cuda，按模板原样生成")
+        return DEFAULT_CONFIG
+    return text
+
+
 def load_config(path=CONFIG_PATH):
     if not os.path.exists(path):
         with open(path, "w", encoding="utf-8") as f:
-            f.write(DEFAULT_CONFIG)
+            f.write(default_config_text())
         log.info("未找到配置文件，已创建默认配置: %s", path)
     yaml = YAML()
     yaml.preserve_quotes = True
@@ -252,6 +293,9 @@ class Pipeline:
         # 导致默认设备变化后自动跟随（见 _vad_loop_inner 看门狗三）
         self._default_id = None
         self._default_kind = None
+        self._segmenter = None
+        self._partial_base_s = 0.8  # 配置里的 vad.partial_interval_s（快照间隔下限）
+        self._speech = False  # VAD 是否判定"正在说话"（设置页状态指示用，见 audio_status）
 
     def _ensure_models(self):
         """首次启动时在后台线程加载模型，不卡 UI。"""
@@ -302,15 +346,18 @@ class Pipeline:
             except Exception as e:
                 log.warning("读取默认音频设备失败: %s", e)
         v = self.cfg.get("vad", {})
+        self._partial_base_s = v.get("partial_interval_s", 0.8)
         segmenter = VadSegmenter(
             on_segment=self._enqueue_segment,
             on_partial=self._enqueue_partial,
+            on_state=self._on_vad_state,
             threshold=v.get("threshold", 0.5),
             min_speech_ms=v.get("min_speech_ms", 250),
             min_silence_ms=v.get("min_silence_ms", 250),
             max_segment_s=v.get("max_segment_s", 10),
-            partial_interval_s=v.get("partial_interval_s", 0.8),
+            partial_interval_s=self._partial_base_s,
         )
+        self._segmenter = segmenter
         self._gen += 1
         gen = self._gen
         self._threads = [
@@ -332,6 +379,7 @@ class Pipeline:
         for t in self._threads:
             t.join(timeout=2)
         self._threads = []
+        self._speech = False  # 停了就别再显示"检测到人声"
 
     def close(self):
         """程序退出前调用：停止流水线并释放翻译后端（连接池等）。"""
@@ -494,6 +542,31 @@ class Pipeline:
             segmenter.feed(chunk)
         segmenter.flush()
 
+    def _on_vad_state(self, speaking):
+        """VAD 状态回调（在 VAD 线程上跑）：只记一个标记，界面自己去读。
+        别在这里做界面调用或耗时操作——会把 VAD 线程拖住。"""
+        self._speech = bool(speaking)
+
+    def audio_status(self):
+        """给设置页音频电平/状态指示用的只读快照：(电平 0~1, 是否正在说话, 是否在监听)。
+
+        电平由捕获线程自记、这里只读队列之外的值，**不消费音频队列**
+        （消费会抢走主流水线的帧，规划 §5.2 红线）。"""
+        cap = self._cap  # 看门狗可能换过捕获对象，每次都取当前的
+        return (cap.last_level if cap is not None else 0.0,
+                self._speech,
+                self.running)
+
+    def _adapt_partial_interval(self, elapsed):
+        """把实测耗时反馈给 VAD：识别/翻译慢时自动拉长快照间隔（规划 §2.2 c）。
+
+        否则会生成一堆处理不完、只会被丢掉的快照，白白占用识别算力。
+        每段语音的第一次快照不受影响（首字延迟优先），见 VadSegmenter.set_partial_interval。
+        """
+        seg = self._segmenter
+        if seg is not None:
+            seg.set_partial_interval(partial_interval_for(elapsed, self._partial_base_s))
+
     def _recover_capture(self, cap, segmenter):
         """按配置重新解析设备并重建捕获线程（配置设备不存在时回退到默认设备）。
         返回可用的 AudioCapture（重建失败时原样返回旧对象）。"""
@@ -573,6 +646,7 @@ class Pipeline:
                 except queue.Empty:
                     continue
             seg, is_partial = item
+            t0 = time.time()
             try:
                 tag = "实时快照" if is_partial else "语音片段"
                 # 快照每 0.8 秒就来一次，按 INFO 记会把滚动日志刷满，降到 DEBUG
@@ -580,7 +654,8 @@ class Pipeline:
                 log_fn("%s %.1fs，开始识别", tag, len(seg) / 16000)
                 text, lang = self._transcriber.transcribe(
                     seg, language=self._source_lock(),
-                    prompt=(self.cfg.get("whisper") or {}).get("prompt"),
+                    # 识别提示词 = 用户填的提示词 + 术语表原文词条（见 glossary.recognition_prompt）
+                    prompt=glossary.recognition_prompt(self.cfg),
                 )
                 if not text:
                     continue
@@ -589,6 +664,8 @@ class Pipeline:
                     payload = live.update(text, lang)
                     self.on_subtitle(payload)
                     log.debug("识别 [%s]（实时）: %s", lang, text)
+                    # 处理一次要多久，决定下一次快照隔多久（后端慢就别催）
+                    self._adapt_partial_interval(time.time() - t0)
                 else:
                     # 段落定稿：整句重译，挪入历史行
                     live.reset()
@@ -670,6 +747,8 @@ class MainApp:
 
         # 后台工作线程经 bridge 信号把字幕送进 Qt 主线程（线程安全）
         self.pipeline = Pipeline(self.cfg, self._emit_subtitle)
+        # 模型下载进度回调（whisper / SenseVoice / NLLB 共用，规划 §3）
+        model_download.set_reporter(self._model_reporter)
 
         self.tray = TrayIcon(on_toggle=self.toggle, on_quit=self.quit,
                              on_settings=self.open_settings, on_ocr=self.start_ocr_snip)
@@ -712,6 +791,8 @@ class MainApp:
         self._latest_update = None
         self.tray.messageClicked.connect(lambda *_: self.open_settings())
         QTimer.singleShot(5000, lambda: self._check_update(auto=True))
+        # 老用户（≤1.3.9 只会拿到 CPU 小包）里有 N 卡的，提示一次去换 CUDA 完整版
+        QTimer.singleShot(9000, self._maybe_suggest_flavor_switch)
 
     _INSTANCE_KEY = "realtime-translate-subtitles-single-instance"
 
@@ -750,8 +831,33 @@ class MainApp:
     def _emit_subtitle(self, payload):
         self.bridge.subtitle_received.emit(payload)
 
+    def _model_reporter(self, stage, label, done, total):
+        """模型下载/加载进度（后台线程调用）→ 字幕条 + 设置页（规划 §3）。
+
+        三段状态：下载中（x/y MB，z%）→ 加载中 → 就绪。名称是中文标签，在这里翻译。
+        """
+        name = tr(label)
+        if stage == "download":
+            if total:
+                text = tr("正在下载{name}：{done:.0f}/{total:.0f} MB（{pct:.0f}%）").format(
+                    name=name, done=done / 1048576, total=total / 1048576,
+                    pct=min(100.0, done * 100 / total),
+                )
+            else:
+                text = tr("正在下载{name}：{done:.0f} MB").format(name=name, done=done / 1048576)
+        elif stage == "load":
+            text = tr("正在加载{name}…").format(name=name)
+        else:
+            text = tr("{name}已就绪").format(name=name)
+        self._emit_subtitle({"kind": "model_status", "text": text})
+
     def _on_subtitle(self, payload):
-        if payload.get("kind") == "info":
+        if payload.get("kind") == "model_status":
+            # 模型下载/加载进度：字幕条和设置页同时显示（首次使用最需要看见的一句话）
+            self.window.update_text("", payload["text"])
+            if self.settings_window is not None:
+                self.settings_window.set_model_status(payload["text"])
+        elif payload.get("kind") == "info":
             # 状态提示（如"模型已就绪"）：只上屏，不计入字幕统计
             self.window.update_text("", payload["zh"])
         elif payload.get("kind") == "stream":
@@ -869,6 +975,38 @@ class MainApp:
         self._ocr_popup = popup
         popup.show()
 
+    def _maybe_suggest_flavor_switch(self):
+        """装了 CPU 精简版、机器却有 N 卡、配置里又要用 GPU 时，提示一次换包。
+
+        只会提示一次（记在 update_state.json）。不在这里自动下载 700 MB：点“去切换”
+        只打开设置页，真正的下载在设置页还会再确认一次。"""
+        from app import flavor as flavor_mod
+        from app import updater
+
+        if flavor_mod.switch_suggestion() != flavor_mod.CUDA:
+            return
+        if (self.cfg.get("whisper") or {}).get("device") != "cuda":
+            return  # 用户本来就在用 CPU 引擎（如极速），不打扰
+        if not updater.flavor_prompt_due():
+            return
+        updater.mark_flavor_prompted()
+
+        box = QMessageBox()
+        box.setWindowTitle(tr("实时翻译字幕"))
+        box.setIcon(QMessageBox.Information)
+        box.setText(tr("检测到 NVIDIA 显卡，但当前安装的是 CPU 精简版"))
+        box.setInformativeText(tr(
+            "精简版不含 CUDA 运行库，识别已自动改用 CPU（比 GPU 慢不少）。\n"
+            "可以换成 CUDA 完整版（约 640 MB，软件内下载）：点下面的按钮，"
+            "在设置页“检查更新”处点“切换到 CUDA 版”。"
+        ))
+        go = box.addButton(tr("去设置页切换"), QMessageBox.AcceptRole)
+        box.addButton(tr("以后再说"), QMessageBox.RejectRole)
+        box.exec_()
+        log.info("已提示一次可切换到 CUDA 完整版")
+        if box.clickedButton() is go:
+            self.open_settings()
+
     def _check_update(self, auto=False):
         """后台线程查询 GitHub Releases，结果经 bridge 回主线程显示。auto=True 为启动时的静默检查。"""
         from app import updater
@@ -881,7 +1019,10 @@ class MainApp:
             return
 
         def run():
-            result = updater.check_update()
+            # 按当前安装的包型取更新包（CPU 小包 / CUDA 完整包），不按硬件猜
+            result = updater.check_update(
+                cfg_device=(self.cfg.get("whisper") or {}).get("device", "")
+            )
             result["auto"] = auto
             if result.get("reachable"):
                 updater.mark_auto_checked()
@@ -920,17 +1061,45 @@ class MainApp:
         import subprocess
         import tempfile
 
+        from app import updater
+
         pid = os.getpid()
         target = os.path.dirname(sys.executable)
         exe = sys.executable
         staging_root = os.path.dirname(new_app_dir)
         # 下载的 zip 与解压目录同名（去 _extract 加 .zip），更新完成后一并清理
         zip_path = staging_root[:-len("_extract")] + ".zip" if staging_root.endswith("_extract") else ""
+        # robocopy /E 只覆盖、不删多余文件：先算出"旧包有、新包没有"的清单
+        # （换包型时清理 CUDA 运行库等；用户数据不进清单，永远不动）
+        try:
+            prune_files, prune_dirs = updater.compute_prune_list(new_app_dir, target)
+        except Exception:
+            log.warning("计算待清理文件失败，本次只做覆盖安装", exc_info=True)
+            prune_files, prune_dirs = [], []
+        log.info("本次更新待清理旧文件 %d 个、空目录 %d 个", len(prune_files), len(prune_dirs))
+        tmp = tempfile.gettempdir()
+        prune_list = os.path.join(tmp, "rts_prune_files.txt")
+        prune_dir_list = os.path.join(tmp, "rts_prune_dirs.txt")
+        for path, items in ((prune_list, prune_files), (prune_dir_list, prune_dirs)):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(items))
         script = f"""
 $ErrorActionPreference = "SilentlyContinue"
 while (Get-Process -Id {pid}) {{ Start-Sleep -Milliseconds 500 }}
 Start-Sleep -Seconds 1
-robocopy "{new_app_dir}" "{target}" /E /IS /XF config.yaml app.log app.log.1 app.log.2 /XD models /NFL /NDL /NJH /NJS | Out-Null
+if (Test-Path -LiteralPath "{prune_list}") {{
+  Get-Content -LiteralPath "{prune_list}" -Encoding UTF8 | ForEach-Object {{
+    if ($_ -and (Test-Path -LiteralPath $_)) {{ Remove-Item -LiteralPath $_ -Force }}
+  }}
+}}
+robocopy "{new_app_dir}" "{target}" /E /IS /XF config.yaml app.log app.log.1 app.log.2 /XD models /NFL /NDL /NJH /NJS /R:2 /W:2 | Out-Null
+if (Test-Path -LiteralPath "{prune_dir_list}") {{
+  Get-Content -LiteralPath "{prune_dir_list}" -Encoding UTF8 | ForEach-Object {{
+    if ($_ -and (Test-Path -LiteralPath $_)) {{ Remove-Item -LiteralPath $_ -Force }}
+  }}
+}}
+Remove-Item -Force "{prune_list}"
+Remove-Item -Force "{prune_dir_list}"
 Start-Process "{exe}"
 Remove-Item -Recurse -Force "{staging_root}"
 Remove-Item -Force "{zip_path}"
@@ -989,7 +1158,11 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
         if self.settings_window is None:
             from app.settings_window import SettingsWindow
 
-            self.settings_window = SettingsWindow(self.cfg, history_provider=self.get_history)
+            self.settings_window = SettingsWindow(
+                self.cfg,
+                history_provider=self.get_history,
+                status_provider=self.pipeline.audio_status,  # 音频电平 / VAD 状态指示
+            )
             self.settings_window.request_toggle.connect(self.toggle)
             self.settings_window.request_clear_history.connect(self.clear_history)
             self.settings_window.request_apply.connect(self.apply_config)
@@ -1092,14 +1265,16 @@ Remove-Item -Force $MyInvocation.MyCommand.Path
                 self.tray.set_running(False)
                 log.info("已停止")
             else:
-                self.pipeline.start()
-                self.tray.set_running(True)
                 if not self.pipeline.models_ready:
                     # 模型未就绪时先给用户明确反馈（首次运行要下载约 460MB 识别模型），
-                    # 就绪后 Pipeline 会再发一条"模型已就绪"提示
+                    # 随后 Pipeline 会持续上报"下载中 x/y MB → 加载中 → 就绪"的实时进度。
+                    # 注意要在 start() 之前设：加载线程一起来就会开始上报，晚了会把进度顶掉
                     self.window.update_text(
                         "", tr("正在加载模型…（首次运行需下载识别模型约 460MB，请保持网络畅通）")
                     )
+                self.pipeline.start()
+                self.tray.set_running(True)
+                if not self.pipeline.models_ready:
                     log.info("已开始监听，模型加载中（首次需下载约 460MB）")
                 else:
                     log.info("已开始监听")

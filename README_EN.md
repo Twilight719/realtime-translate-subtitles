@@ -10,7 +10,9 @@ A Windows desktop tool for real-time translated subtitles: it listens to your PC
 - **Simultaneous-interpreter style captions**: previous sentence + current original + current translation; unconfirmed text scrolls in dim italics while confirmed text stays rock solid
 - **Automatic language detection**: Whisper recognizes ~99 languages; you can also lock the source language (zh/en/ja/ko/ru) for better speed and accuracy. An optional SenseVoice engine offers ~30x real-time recognition on CPU for zh/en/ja/ko/yue
 - **Multiple translation backends**: Youdao / LLM APIs (DeepSeek etc.) / MyMemory / Google / offline NLLB fallback, tried in priority order with automatic failover
+- **Glossary (custom dictionary)**: one entry per line in the settings page as `source=target` (e.g. `原神=Genshin Impact`). The LLM backend is required to use your wording — Youdao / Google / NLLB can't take a dictionary; the source terms are also used as a recognition prompt so proper nouns come out right
 - **Headphone hot-swap**: follows the default output device automatically when you plug/unplug headphones
+- **Audio level indicator**: the settings page shows a live level bar and a "speech detected / silent" state, so when no subtitles appear you can tell at a glance whether audio is being captured at all
 - **GUI settings**: subtitle style (font/color/opacity/width/position), screenshot popup, languages, models, translation backends, log viewer — each option has a built-in explanation; UI available in Chinese and English
 - **Global hotkey** (Alt+T by default, customizable to any Ctrl/Alt/Shift combo in Settings), system tray
 - **Screenshot translation**: press Ctrl+Alt+R and drag-select any screen region → built-in Windows OCR → translation popup — made for manga and image text (Japanese requires the Windows Japanese language pack)
@@ -24,7 +26,7 @@ A Windows desktop tool for real-time translated subtitles: it listens to your PC
 
 ### First run downloads models (important)
 
-- **Speech recognition model** (~460MB): downloaded automatically from a mirror (hf-mirror.com) on first Alt+T — keep your network connected; the subtitle bar shows progress hints
+- **Speech recognition model** (~460MB): downloaded automatically from a mirror (hf-mirror.com) on first Alt+T — keep your network connected; the subtitle bar and settings page show progress (downloading x/y MB (z%) → loading → ready)
 - **Offline translation model** (~600MB): only downloaded when the local NLLB fallback is actually used
 - If a download fails, the subtitle bar shows an error — check your network and press Alt+T again to resume
 - Models are downloaded once and reused forever (translation itself still needs network unless you use NLLB)

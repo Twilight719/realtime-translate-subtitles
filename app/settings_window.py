@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (    QApplication,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
+    QProgressBar,
     QProgressDialog,
     QPushButton,
     QSlider,
@@ -35,19 +36,27 @@ from PyQt5.QtWidgets import (    QApplication,
     QWidget,
 )
 
-from .version import __version__
+from .version import GITHUB_RELEASES_URL, __version__
 
 try:
     from .paths import base_dir
     from .hotkeys import parse_hotkey
     from .i18n import tr
+    from . import flavor as flavor_mod
     from . import i18n_strings  # noqa: F401  注册中英文映射
 except ImportError:  # 直接运行本文件做界面预览时
     sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     from app.paths import base_dir
     from app.hotkeys import parse_hotkey
     from app.i18n import tr
+    from app import flavor as flavor_mod
     import app.i18n_strings  # noqa: F401
+
+# 两个包的用户可见体积（"约"即可，别写精确值）：2026-10-11 打包彩排实测
+# CUDA 638.9 MB / CPU 111.5 MB（v1.4.0，含 av 剔除）。改动打包内容后跑一次
+# tools/package_release.py 看成品的真实大小再回来更新这里（README 里的数字同源）。
+SIZE_CPU = "约 110 MB"
+SIZE_CUDA = "约 640 MB"
 
 QSS = """
 QMainWindow, QWidget { background: #1e1e26; color: #e6e6ea; font-family: "Microsoft YaHei"; font-size: __FS__px; }
@@ -67,7 +76,7 @@ QLineEdit, QSpinBox, QComboBox, QPlainTextEdit {
     background: #17171d; border: 1px solid #34343f; border-radius: 6px; padding: 6px 8px;
     selection-background-color: #4f8cff;
 }
-QLineEdit:focus, QSpinBox:focus, QComboBox:focus { border-color: #4f8cff; }
+QLineEdit:focus, QSpinBox:focus, QComboBox:focus, QPlainTextEdit:focus { border-color: #4f8cff; }
 QComboBox QAbstractItemView { background: #2d2d3a; selection-background-color: #4f8cff; }
 QSlider::groove:horizontal { height: 6px; background: #34343f; border-radius: 3px; }
 QSlider::handle:horizontal { width: 16px; height: 16px; margin: -5px 0; border-radius: 8px; background: #4f8cff; }
@@ -75,6 +84,8 @@ QSlider::sub-page:horizontal { background: #4f8cff; border-radius: 3px; }
 QCheckBox { spacing: 8px; }
 QCheckBox::indicator { width: 16px; height: 16px; }
 QListWidget#orderList { background: #17171d; border: 1px solid #34343f; border-radius: 6px; }
+QProgressBar#level { background: #17171d; border: 1px solid #34343f; border-radius: 6px; }
+QProgressBar#level::chunk { background: #4f8cff; border-radius: 5px; }
 QLabel#hint { color: #8a8a95; font-size: __FS_HINT__px; }
 QLabel#statusDot { font-size: __FS_DOT__px; }
 QPushButton#helpToggle { background: transparent; color: #8ab4ff; text-align: left; padding: 4px 0; border: none; }
@@ -90,6 +101,25 @@ def build_qss(fs=13):
         .replace("__FS_HINT__", str(max(10, fs - 1)))
         .replace("__FS__", str(fs))
     )
+
+
+def level_percent(peak):
+    """音量峰值（0~1）→ 电平条百分比（0~100）。
+
+    按 -50dB~0dB 映射：线性刻度下正常语音只占满刻度的一小截，
+    条几乎不动；换算成 dB 后才看得出"有没有声音、声音多大"。
+    """
+    try:
+        peak = float(peak)
+    except (TypeError, ValueError):
+        return 0
+    if peak <= 0:
+        return 0
+    import math
+
+    db = 20 * math.log10(min(peak, 1.0))
+    return int(max(0.0, min(1.0, (db + 50.0) / 50.0)) * 100)
+
 
 class SliderSpin(QWidget):
     """拖动条 + 精确数值输入二合一控件，点右侧按钮切换显示模式，两者双向同步。"""
@@ -272,8 +302,11 @@ class SettingsWindow(QMainWindow):
     request_check_update = pyqtSignal()  # “检查更新”按钮
     request_install_update = pyqtSignal(str)  # 更新包已下载解压，主程序执行替换重启
     request_clear_history = pyqtSignal()  # 清空字幕记录
-    download_progress = pyqtSignal(int, int, int, int)  # 已下载字节, 总字节, 通道序号, 通道总数
+    # 已下载字节, 总字节, 通道序号, 通道总数, 通道名, 实测速度 B/s
+    download_progress = pyqtSignal(int, int, int, int, str, float)
+    download_status = pyqtSignal(str)  # 测速/换通道文案
     download_finished = pyqtSignal(bool, str, str)  # 成功?, 错误描述或使用的地址, zip 路径
+    flavor_switch_ready = pyqtSignal(bool, str, object)  # 换包：成功?, 错误描述, 资产 dict
 
     # 字幕外观默认值（“恢复默认设置”用）
     SUBTITLE_DEFAULTS = {
@@ -287,10 +320,12 @@ class SettingsWindow(QMainWindow):
         "src_color": "#FFFFFF",
     }
 
-    def __init__(self, cfg, history_provider=None):
+    def __init__(self, cfg, history_provider=None, status_provider=None):
         super().__init__()
         self.cfg = cfg
         self._history_provider = history_provider
+        # status_provider() → (电平 0~1, 是否在说话, 是否在监听)，见 main.Pipeline.audio_status
+        self._status_provider = status_provider
         self.setWindowTitle(tr("实时翻译字幕 · 设置 v{ver}").format(ver=__version__))
         self.resize(760, 560)
         self._ui_font = (cfg.get("ui") or {}).get("font_size", 13)
@@ -345,10 +380,16 @@ class SettingsWindow(QMainWindow):
         layout.addWidget(right)
         self.sidebar.currentRowChanged.connect(self.pages.setCurrentIndex)
         self.sidebar.setCurrentRow(0)
+        self.flavor_switch_ready.connect(self._on_flavor_switch_ready)
 
         self._log_timer = QTimer(self)
         self._log_timer.setInterval(2000)
         self._log_timer.timeout.connect(self._refresh_log)
+
+        # 电平条只在这个窗口可见时刷新（150ms 一次，够跟手又不费电）
+        self._level_timer = QTimer(self)
+        self._level_timer.setInterval(150)
+        self._level_timer.timeout.connect(self._refresh_audio_status)
 
     # ---------- 主页 ----------
     def _build_home_page(self):
@@ -356,7 +397,8 @@ class SettingsWindow(QMainWindow):
         v = QVBoxLayout(page)
 
         box = QGroupBox(tr("运行状态"))
-        h = QHBoxLayout(box)
+        bv = QVBoxLayout(box)
+        h = QHBoxLayout()
         self.status_dot = QLabel("●")
         self.status_dot.setObjectName("statusDot")
         self.status_label = QLabel(tr("已停止"))
@@ -369,6 +411,28 @@ class SettingsWindow(QMainWindow):
         self.btn_toggle.setMinimumSize(120, 40)
         self.btn_toggle.clicked.connect(self.request_toggle.emit)
         h.addWidget(self.btn_toggle)
+        bv.addLayout(h)
+        # 模型三段状态：下载中 x/y MB（z%）→ 加载中 → 就绪（首次使用最需要看见的一句话）
+        self.model_status = QLabel()
+        self.model_status.setObjectName("hint")
+        self.model_status.setWordWrap(True)
+        self.model_status.setVisible(False)
+        bv.addWidget(self.model_status)
+        # 音频电平 + VAD 状态：没声音/麦插错了，看这里最快（规划 §5.2）
+        level_row = QHBoxLayout()
+        level_row.addWidget(QLabel(tr("音频电平")))
+        self.level_bar = QProgressBar()
+        self.level_bar.setObjectName("level")
+        self.level_bar.setRange(0, 100)
+        self.level_bar.setValue(0)
+        self.level_bar.setTextVisible(False)
+        self.level_bar.setFixedHeight(12)
+        level_row.addWidget(self.level_bar, 1)
+        self.level_state = QLabel(tr("未监听"))
+        self.level_state.setObjectName("hint")
+        self.level_state.setMinimumWidth(80)
+        level_row.addWidget(self.level_state)
+        bv.addLayout(level_row)
         v.addWidget(box)
 
         info = QGroupBox(tr("当前配置"))
@@ -481,6 +545,19 @@ class SettingsWindow(QMainWindow):
         update_row.addWidget(self.update_result)
         update_row.addStretch()
         af.addRow(update_row)
+        # 换包入口：装了 CPU 精简版的用户日后换 N 卡时，光改 device 是启用不了 GPU 的
+        # （小包里没有 cuBLAS），而软件内更新只在"有新版本"时触发 → 必须有出口（规划 §1.2）
+        self.flavor_label = QLabel("")
+        self.flavor_label.setObjectName("hint")
+        self.btn_switch_flavor = QPushButton("")
+        self.btn_switch_flavor.clicked.connect(self._on_switch_flavor)
+        self.btn_switch_flavor.setVisible(False)
+        switch_row = QHBoxLayout()
+        switch_row.addWidget(self.flavor_label)
+        switch_row.addWidget(self.btn_switch_flavor)
+        switch_row.addStretch()
+        af.addRow(switch_row)
+        self._refresh_flavor_row()
         v.addWidget(about)
 
         hint = QLabel(tr("提示：托盘图标双击可快速启停；关闭本窗口不会退出程序（托盘常驻）。"))
@@ -876,6 +953,27 @@ class SettingsWindow(QMainWindow):
         nllb_row.addRow(tr("NLLB 运行设备"), self.combo_nllb)
         v.addLayout(nllb_row)
 
+        gl = QGroupBox(tr("术语表（自定义词典）"))
+        gf = QVBoxLayout(gl)
+        self.edit_glossary = QPlainTextEdit()
+        self.edit_glossary.setPlaceholderText(tr(
+            "每行一条，用等号分隔原文与译文，如：\n"
+            "原神=Genshin Impact\n"
+            "元素爆发=Elemental Burst"))
+        gl_raw = t.get("glossary") or []
+        if isinstance(gl_raw, str):  # 手写成整段多行文本也认
+            gl_raw = gl_raw.splitlines()
+        self.edit_glossary.setPlainText("\n".join(str(x) for x in gl_raw))
+        self.edit_glossary.setMinimumHeight(80)
+        gf.addWidget(self.edit_glossary)
+        gl_hint = QLabel(tr(
+            "只对“大模型 API”后端生效：有道 / Google / MyMemory / 本地 NLLB 用不了自定义词典。"
+            "词条原文还会作为识别提示词（whisper 引擎有效），帮识别把专名拼对。"))
+        gl_hint.setObjectName("hint")
+        gl_hint.setWordWrap(True)
+        gf.addWidget(gl_hint)
+        v.addWidget(gl)
+
         llm = QGroupBox(tr("大模型 API（选择“大模型 API”后端时生效）"))
         lf = QFormLayout(llm)
         cfg_llm = t.get("llm_api", {})
@@ -903,6 +1001,7 @@ class SettingsWindow(QMainWindow):
             tr("NLLB 运行设备：cpu 不占显存（推荐，把显存留给识别和游戏）；cuda 更快但多占约 1GB 显存。"),
             tr("Base URL / API Key / 模型名：选择“大模型 API”后端时生效，DeepSeek 官方地址为 https://api.deepseek.com/v1。"),
             tr("流式输出：开启后译文逐字上屏（像打字一样），不用等整句翻完；关闭则等整句翻完一次性显示。仅对“大模型 API”后端生效。"),
+            tr("术语表：每行一条“原文=译文”，如“原神=Genshin Impact”。只对“大模型 API”后端生效（有道 / Google / MyMemory / 本地 NLLB 吃不了词典）；词条原文会同时作为识别提示词，帮 whisper 把专名拼对。"),
         ]))
 
         hint = QLabel(tr("API Key 以明文保存在本地 config.yaml 中。翻译后端改动立即重建，无需重启监听。"))
@@ -1047,6 +1146,36 @@ class SettingsWindow(QMainWindow):
             self.status_dot.setStyleSheet("color: #888888;")
             self.status_label.setText(tr("已停止"))
             self.btn_toggle.setText(tr("开始监听"))
+            self.set_model_status("")  # 停了就没有模型状态可看了
+        self._refresh_audio_status()  # 电平条/状态跟着启停立刻变，不用等下一次定时器
+
+    def set_model_status(self, text=""):
+        """模型三段状态（下载中 x/y MB → 加载中 → 就绪），空字符串 = 不显示。"""
+        self.model_status.setText(text)
+        self.model_status.setVisible(bool(text))
+
+    def _refresh_audio_status(self):
+        """刷音频电平条与 VAD 状态（定时器调用）。
+
+        电平由捕获线程自记、这里只读（不消费音频队列，规划 §5.2 红线）；
+        取不到数据源时保持"未监听"，不报错。
+        """
+        if self._status_provider is None:
+            return
+        try:
+            level, speaking, listening = self._status_provider()
+        except Exception:
+            return
+        self.level_bar.setValue(level_percent(level) if listening else 0)
+        if not listening:
+            self.level_state.setText(tr("未监听"))
+            self.level_state.setStyleSheet("")
+        elif speaking:
+            self.level_state.setText(tr("检测到人声"))
+            self.level_state.setStyleSheet("color: #4CAF50;")
+        else:
+            self.level_state.setText(tr("静音"))
+            self.level_state.setStyleSheet("")
 
     def set_subtitle_count(self, n):
         self.stat_count.setText(str(n))
@@ -1067,8 +1196,16 @@ class SettingsWindow(QMainWindow):
         import webbrowser
 
         self.btn_update.setEnabled(True)
+        self._refresh_flavor_row(result)
         if result.get("error"):
             self.update_result.setText(tr("检查失败：{err}").format(err=result["error"]))
+            if popup and result.get("flavor_missing"):
+                # 本次发布只有一个包：给用户一条明路（手动下载页），但绝不自动装另一个包
+                if QMessageBox.question(
+                    self, tr("缺少安装包"),
+                    tr("{err}\n\n现在打开下载页面吗？").format(err=result["error"]),
+                ) == QMessageBox.Yes:
+                    webbrowser.open(result["url"])
             return
         if result.get("has_update"):
             self._latest_update = result
@@ -1084,9 +1221,11 @@ class SettingsWindow(QMainWindow):
             box.setText(
                 tr(
                     "最新版本 {latest} 已发布（当前 v{ver}）。\n\n"
+                    "本次将下载{pack}。\n\n"
                     "“软件内下载”会优先走国内加速镜像，全部失败才用 GitHub 直连；\n"
                     "下载完成后自动替换旧文件并重启（你的配置和已下载模型都会保留）。"
-                ).format(latest=result["latest"], ver=__version__)
+                ).format(latest=result["latest"], ver=__version__,
+                         pack=self._pack_desc(result.get("asset")))
             )
             btn_dl = box.addButton(tr("软件内下载更新（推荐）"), QMessageBox.AcceptRole)
             btn_web = box.addButton(tr("打开下载页面"), QMessageBox.ActionRole)
@@ -1101,8 +1240,91 @@ class SettingsWindow(QMainWindow):
             self._latest_update = None
             self.update_result.setText(tr("已是最新版本（v{ver}）").format(ver=__version__))
 
+    # ---------- 包型（CPU 精简版 / CUDA 完整版） ----------
+    @staticmethod
+    def _pack_desc(asset):
+        """包型 + 体积描述，用于提示“将要下载什么”。"""
+        if not asset:
+            return tr("安装包")
+        name = tr("CUDA 完整版") if asset.get("flavor") == flavor_mod.CUDA else tr("CPU 精简版")
+        size = (asset.get("size") or 0) / 1048576
+        return f"{name}（{size:.0f} MB）" if size else name
+
+    def _refresh_flavor_row(self, result=None):
+        """刷新"当前包型 + 换包入口"。检查更新后也调用一次（包型可能刚变）。"""
+        if flavor_mod.read_marker() is None:
+            # 源码运行 / 手工拆包：不显示包型，也不提供切换（切了会覆盖到源码目录上）
+            self.flavor_label.setText("")
+            self.btn_switch_flavor.setVisible(False)
+            return
+        cur = flavor_mod.current()
+        self.flavor_label.setText(
+            tr("当前为{name}（更新包{size}）").format(
+                name=tr("CUDA 完整版") if cur == flavor_mod.CUDA else tr("CPU 精简版"),
+                size=SIZE_CUDA if cur == flavor_mod.CUDA else SIZE_CPU,
+            )
+        )
+        target = flavor_mod.switch_suggestion()
+        if target:
+            self.btn_switch_flavor.setText(
+                tr("切换到 CUDA 版（{size}）").format(size=SIZE_CUDA) if target == flavor_mod.CUDA
+                else tr("切换到 CPU 精简版（{size}）").format(size=SIZE_CPU)
+            )
+            self.btn_switch_flavor.setVisible(True)
+        else:
+            self.btn_switch_flavor.setVisible(False)
+
+    def _on_switch_flavor(self):
+        """换包：下载当前版本的另一种包并安装（不经过"有新版本"判断）。"""
+        target = flavor_mod.switch_suggestion()
+        if not target:
+            return
+        to_cuda = target == flavor_mod.CUDA
+        name = tr("CUDA 完整版") if to_cuda else tr("CPU 精简版")
+        size = "约 700 MB" if to_cuda else "约 150 MB"
+        if QMessageBox.question(
+            self, tr("切换安装包"),
+            tr("将下载并安装{nname}（{size}），完成后自动重启。\n"
+               "你的配置和已下载的模型都会保留。\n\n"
+               "{note}").format(
+                nname=name, size=size,
+                note=(tr("切换后可在“识别模型”里把设备设为 cuda 以启用 GPU 加速。")
+                      if to_cuda else tr("切换后程序目录会删掉 CUDA 运行库，节省约 600 MB 磁盘。")),
+            ),
+        ) != QMessageBox.Yes:
+            return
+        self.btn_switch_flavor.setEnabled(False)
+        self.flavor_label.setText(tr("正在获取下载地址…"))
+
+        def run():
+            try:
+                from .updater import fetch_release
+            except ImportError:
+                from app.updater import fetch_release
+
+            rel = fetch_release()
+            asset = (rel.get("assets") or {}).get(target)
+            self.flavor_switch_ready.emit(
+                bool(asset),
+                rel.get("error") or tr("本次发布缺少{name}，请稍后重试或到下载页手动下载").format(name=name),
+                asset or {},
+            )
+
+        threading.Thread(target=run, daemon=True).start()
+
+    def _on_flavor_switch_ready(self, ok, err, asset):
+        self.btn_switch_flavor.setEnabled(True)
+        self._refresh_flavor_row()
+        if not ok:
+            QMessageBox.warning(self, tr("切换失败"), err)
+            return
+        self._start_download(
+            {"asset": asset, "latest": asset.get("tag") or __version__, "url": GITHUB_RELEASES_URL},
+            title=tr("下载{pack}").format(pack=self._pack_desc(asset)),
+        )
+
     # ---------- 软件内下载更新 ----------
-    def _start_download(self, result):
+    def _start_download(self, result, title=None):
         asset = result.get("asset")
         if not asset:
             # Release 里没有标准更新包附件（异常情况），退化为浏览器下载
@@ -1122,37 +1344,58 @@ class SettingsWindow(QMainWindow):
             return
         self._dl_cancel = threading.Event()
         self._dl_dialog = QProgressDialog(tr("准备下载…"), tr("取消"), 0, 100, self)
-        self._dl_dialog.setWindowTitle(tr("下载更新 {latest}").format(latest=result["latest"]))
+        self._dl_dialog.setWindowTitle(
+            title or tr("下载更新 {latest}").format(latest=result.get("latest", ""))
+        )
         self._dl_dialog.setWindowModality(Qt.WindowModal)
         self._dl_dialog.setMinimumDuration(0)
         self._dl_dialog.setMinimumWidth(420)
         self._dl_dialog.canceled.connect(self._dl_cancel.set)
         self.download_progress.connect(self._on_dl_progress)
+        self.download_status.connect(self._on_dl_status)
         self.download_finished.connect(self._on_dl_finished)
 
         def run():
             used_url, err = download_asset(
                 asset, dest,
                 progress_cb=lambda *a: self.download_progress.emit(*a),
+                status_cb=lambda stage, name, i, n: self.download_status.emit(
+                    tr("正在测速下载通道…") if stage == "probe"
+                    else tr("正在通过 {name} 下载…").format(name=name)
+                ),
                 cancel=self._dl_cancel,
             )
             self.download_finished.emit(err is None, err or used_url, dest)
 
         threading.Thread(target=run, daemon=True).start()
 
-    def _on_dl_progress(self, done, total, idx, count):
-        channel = tr("GitHub 直连") if idx == count - 1 else tr("镜像 {n}").format(n=idx + 1)
+    def _on_dl_status(self, text):
+        if self._dl_dialog is not None:
+            # 测速/换通道：进度条留在原值，只换文案，用户能看出在换通道而不是卡死
+            self._dl_dialog.setLabelText(text)
+
+    @staticmethod
+    def _speed_text(bps):
+        if not bps:
+            return ""
+        return (tr("{n:.1f} MB/s").format(n=bps / 1048576) if bps >= 1048576
+                else tr("{n:.0f} KB/s").format(n=bps / 1024))
+
+    def _on_dl_progress(self, done, total, idx, count, name, speed):
+        speed_text = self._speed_text(speed)
+        channel = f"{name}，{speed_text}" if speed_text else name
         if total:
             self._dl_dialog.setLabelText(
-                tr("正在下载（{channel}，第 {idx}/{count} 个通道）：\n{done:.0f} / {total:.0f} MB").format(
-                    channel=channel, idx=idx + 1, count=count,
-                    done=done / 1048576, total=total / 1048576,
+                tr("正在下载（{channel}）：\n{done:.0f} / {total:.0f} MB（{pct:.0f}%）").format(
+                    channel=channel, done=done / 1048576, total=total / 1048576,
+                    pct=done * 100 / total,
                 )
             )
             self._dl_dialog.setValue(int(done * 100 / total))
         else:
             self._dl_dialog.setLabelText(
-                tr("正在下载（{channel}）：{done:.0f} MB").format(channel=channel, done=done / 1048576)
+                tr("正在下载（{channel}）：{done:.0f} MB").format(
+                    channel=channel, done=done / 1048576)
             )
 
     def _on_dl_finished(self, ok, info, dest):
@@ -1220,10 +1463,13 @@ class SettingsWindow(QMainWindow):
         self._refresh_log()
         if self.chk_autolog.isChecked():
             self._log_timer.start()
+        self._refresh_audio_status()
+        self._level_timer.start()
         super().showEvent(event)
 
     def hideEvent(self, event):
         self._log_timer.stop()
+        self._level_timer.stop()
         # 实时预览过但没点“保存并应用”→ 还原为已保存的外观
         if self._live_dirty:
             self._live_dirty = False
@@ -1361,6 +1607,9 @@ class SettingsWindow(QMainWindow):
             if self.order_list.item(i).checkState() == Qt.Checked
         ]
         t["nllb_device"] = self.combo_nllb.currentText()
+        # 术语表按行存成列表（空行丢掉）：留空就是 []，配置干净、也不会触发无谓的翻译链重建
+        t["glossary"] = [ln.strip() for ln in self.edit_glossary.toPlainText().splitlines()
+                         if ln.strip()]
         t.setdefault("llm_api", {})
         t["llm_api"]["base_url"] = self.edit_base_url.text().strip()
         t["llm_api"]["api_key"] = self.edit_api_key.text().strip()
