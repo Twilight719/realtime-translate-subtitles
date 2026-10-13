@@ -753,7 +753,27 @@ def check_asr_repeat():
         ok = False
         detail.append(msg)
 
-    from app.transcriber import DEGENERATE_RATIO, _compression_ratio, collapse_repeats
+    # 源码断言放最前面：不需要第三方依赖，CI（只装 requests）上也能守住
+    # 重跑只由压缩比触发，且必须带上温度（否则重跑等于白跑）
+    with open(os.path.join(ROOT, "app", "transcriber.py"), encoding="utf-8") as f:
+        src = f.read()
+    for want in ("temperature=temperature", "RETRY_TEMPERATURE", "_compression_ratio(text)",
+                 "collapse_repeats(text)", "condition_on_previous_text=False"):
+        if want not in src:
+            fail(f"transcriber.py 缺少 {want!r}")
+    if "temperature=[0.0," in src or "temperature=[0," in src:
+        fail("别退回多级温度阶梯：默认那套 8 级会在嘈杂音频上连跑好几遍")
+
+    try:
+        import numpy as np
+
+        from app.transcriber import DEGENERATE_RATIO, _compression_ratio, collapse_repeats
+    except ImportError as e:
+        # 纯函数与接线验证都得 import transcriber 本体（它顶层 import numpy/faster_whisper），
+        # CI 装不起依赖就标跳过——本地全量 run_checks 是发版前的硬门槛
+        record("识别复读（压缩比判据/重跑/折叠兜底）", ok,
+               "; ".join(detail + [f"跳过（本环境缺依赖 {getattr(e, 'name', e)}）"]))
+        return
 
     if not 2.0 < DEGENERATE_RATIO <= 3.0:
         fail(f"压缩比阈值 {DEGENERATE_RATIO} 偏离 whisper 官方推荐区间")
@@ -800,20 +820,8 @@ def check_asr_repeat():
     if mid_n != 5 or mid_out != "好的。我知道了。那就这样。":
         fail(f"中间复读折叠不对：{mid_out!r}（{mid_n} 遍）")
 
-    # 源码断言：重跑只由压缩比触发，且必须带上温度（否则重跑等于白跑）
-    with open(os.path.join(ROOT, "app", "transcriber.py"), encoding="utf-8") as f:
-        src = f.read()
-    for want in ("temperature=temperature", "RETRY_TEMPERATURE", "_compression_ratio(text)",
-                 "collapse_repeats(text)", "condition_on_previous_text=False"):
-        if want not in src:
-            fail(f"transcriber.py 缺少 {want!r}")
-    if "temperature=[0.0," in src or "temperature=[0," in src:
-        fail("别退回多级温度阶梯：默认那套 8 级会在嘈杂音频上连跑好几遍")
-
     # 接线验证：拿假模型跑通 transcribe()，确认①正常语音只跑一遍（不多花时间）
     # ②复读时才补跑 0.6 并采用重跑结果 ③重跑也压不住时交给折叠兜底
-    import numpy as np
-
     from app.transcriber import Transcriber
 
     class _Seg:
