@@ -15,6 +15,8 @@ _TEXT_ERRORS = {"102", "103"}
 
 class YoudaoWebTranslator(Translator):
     name = "youdao_web"
+    # 快照链第一个：单次 0.08 秒、免 key，只要不被限流就该用它
+    partial_rank = 0
 
     def __init__(self, timeout=8):
         self.timeout = timeout

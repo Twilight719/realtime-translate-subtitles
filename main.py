@@ -19,7 +19,7 @@ import queue
 import re
 import threading
 import time
-from collections import deque
+from collections import Counter, deque
 
 from ruamel.yaml import YAML
 
@@ -33,6 +33,78 @@ LOG_PATH = os.path.join(BASE_DIR, "app.log")
 # 实时快照间隔的自适应上限（秒）：识别+翻译一次要多久，快照间隔就至少拉多长
 # （规划 §2.2 c，下限是配置里的 vad.partial_interval_s）
 PARTIAL_INTERVAL_MAX_S = 2.0
+
+
+class PipelineStats:
+    """流水线耗时/丢弃统计：每半分钟汇总成一条日志。
+
+    "识别和翻译各花多久""字幕是被处理不过来丢掉的，还是根本没识别出来"——
+    以前这些只能靠一条条孤立的日志去猜。汇总成一行后，看直播时把 app.log
+    发过来就能直接定位瓶颈在哪一环。"""
+
+    WINDOW_S = 30.0
+    MAX_SAMPLES = 300  # 单个窗口内最多留这么多样本（够算中位数，又不吃内存）
+
+    def __init__(self):
+        self._start = time.time()
+        self._asr = deque(maxlen=self.MAX_SAMPLES)   # 识别耗时
+        self._item = deque(maxlen=self.MAX_SAMPLES)  # 单条（识别+翻译）总耗时
+        self._dropped = Counter()                    # 丢弃计数（按类型）
+        self._interval = None                        # 当前快照间隔（自适应后的实际值）
+
+    def record(self, asr_s=None, item_s=None):
+        if asr_s is not None:
+            self._asr.append(asr_s)
+        if item_s is not None:
+            self._item.append(item_s)
+
+    def record_drop(self, kind):
+        self._dropped[kind] += 1
+
+    def set_interval(self, seconds):
+        self._interval = seconds
+
+    @staticmethod
+    def _median(values):
+        if not values:
+            return 0.0
+        ordered = sorted(values)
+        mid = len(ordered) // 2
+        if len(ordered) % 2:
+            return ordered[mid]
+        return (ordered[mid - 1] + ordered[mid]) / 2
+
+    def take_due(self, translator):
+        """到点且这一窗确实干过活时，返回一行摘要，否则返回 None。"""
+        if time.time() - self._start < self.WINDOW_S:
+            return None
+        if not self._item and not self._dropped:
+            self._start = time.time()  # 没在听/没语音：不刷日志，只把窗口往后挪
+            return None
+        parts = []
+        if self._item:
+            parts.append(
+                "处理 %d 条（单条中位 %.2fs 最慢 %.2fs，识别中位 %.2fs）"
+                % (len(self._item), self._median(self._item),
+                   max(self._item), self._median(self._asr))
+            )
+        if self._dropped:
+            parts.append("丢弃 " + " ".join(
+                "%s %d" % (k, v) for k, v in self._dropped.most_common()))
+        if self._interval:
+            parts.append("快照间隔 %.1fs" % self._interval)
+        used = translator.take_usage() if hasattr(translator, "take_usage") else Counter()
+        if used:
+            parts.append("翻译后端 " + " ".join(
+                "%s×%d" % (k, v) for k, v in used.most_common()))
+        self._reset()
+        return "流水线统计（近 %.0fs）：%s" % (self.WINDOW_S, " | ".join(parts))
+
+    def _reset(self):
+        self._start = time.time()
+        self._asr.clear()
+        self._item.clear()
+        self._dropped.clear()
 
 
 def partial_interval_for(elapsed, base):
@@ -296,6 +368,7 @@ class Pipeline:
         self._segmenter = None
         self._partial_base_s = 0.8  # 配置里的 vad.partial_interval_s（快照间隔下限）
         self._speech = False  # VAD 是否判定"正在说话"（设置页状态指示用，见 audio_status）
+        self._stats = PipelineStats()  # 耗时/丢弃统计（每半分钟一条日志）
 
     def _ensure_models(self):
         """首次启动时在后台线程加载模型，不卡 UI。"""
@@ -324,6 +397,7 @@ class Pipeline:
         self._vad_reset_pending.clear()
         # 清空队列里的残留：上次停止时可能留有旧语音，混入会造成识别错乱
         self._drain_queues()
+        self._stats = PipelineStats()  # 统计窗口从本次启动重新算起
         threading.Thread(target=self._load_models_safe, daemon=True).start()
         audio_cfg = self.cfg.get("audio") or {}
         source = audio_cfg.get("source", "loopback")
@@ -399,14 +473,14 @@ class Pipeline:
                 except queue.Empty:
                     break
 
-    @staticmethod
-    def _put_latest(q, item, kind):
+    def _put_latest(self, q, item, kind):
         """队列满时丢弃最旧的、放入最新的——宁可跳句也不让字幕越落越远。"""
         try:
             q.put_nowait(item)
         except queue.Full:
             try:
                 q.get_nowait()
+                self._stats.record_drop(kind)
                 log.warning("处理跟不上语速，丢弃最旧的%s，优先处理最新语音", kind)
             except queue.Empty:
                 pass
@@ -557,6 +631,15 @@ class Pipeline:
                 self._speech,
                 self.running)
 
+    def _fast_translate(self, text, lang):
+        """快照翻译：走"跟手优先"的那条路（见 FallbackTranslator.translate_fast）。
+
+        快照每 1~2 秒一次，所以按实测快慢另排一遍后端（有道 → 大模型 → MyMemory），
+        而不是照 config 里的整句优先级；大模型这一次不记上下文、超时也更短。"""
+        translator = self._translator
+        fn = getattr(translator, "translate_fast", None) or translator.translate
+        return fn(text, lang, self._target_lang())
+
     def _adapt_partial_interval(self, elapsed):
         """把实测耗时反馈给 VAD：识别/翻译慢时自动拉长快照间隔（规划 §2.2 c）。
 
@@ -565,7 +648,9 @@ class Pipeline:
         """
         seg = self._segmenter
         if seg is not None:
-            seg.set_partial_interval(partial_interval_for(elapsed, self._partial_base_s))
+            interval = partial_interval_for(elapsed, self._partial_base_s)
+            seg.set_partial_interval(interval)
+            self._stats.set_interval(interval)
 
     def _recover_capture(self, cap, segmenter):
         """按配置重新解析设备并重建捕获线程（配置设备不存在时回退到默认设备）。
@@ -633,10 +718,11 @@ class Pipeline:
         # 加载期间（首次要下载模型，可能几分钟）采集到的音频早已过期：
         # 清掉积压，否则就绪瞬间会集中补翻几分钟前的旧语音
         self._drain_queues()
-        live = LiveCaptionState(
-            lambda t, lang: self._translator.translate(t, lang, self._target_lang())
-        )
+        live = LiveCaptionState(lambda t, lang: self._fast_translate(t, lang))
         while not self._stop.is_set() and self._gen == gen:
+            summary = self._stats.take_due(self._translator)
+            if summary:
+                log.info("%s", summary)
             # 优先处理定稿段落（要挪入历史行）；没有定稿再取最新快照
             try:
                 item = self._seg_q.get_nowait()
@@ -657,15 +743,21 @@ class Pipeline:
                     # 识别提示词 = 用户填的提示词 + 术语表原文词条（见 glossary.recognition_prompt）
                     prompt=glossary.recognition_prompt(self.cfg),
                 )
+                asr_s = time.time() - t0
                 if not text:
+                    # 识别没出字（静音/音乐误触发）：只记识别耗时，别把它算进处理条数
+                    self._stats.record(asr_s=asr_s, item_s=asr_s)
                     continue
+                self._stats.record(asr_s=asr_s)
                 if is_partial:
                     # 快照：走 LocalAgreement，定稿区稳定、尾部滚动
                     payload = live.update(text, lang)
                     self.on_subtitle(payload)
                     log.debug("识别 [%s]（实时）: %s", lang, text)
                     # 处理一次要多久，决定下一次快照隔多久（后端慢就别催）
-                    self._adapt_partial_interval(time.time() - t0)
+                    elapsed = time.time() - t0
+                    self._stats.record(item_s=elapsed)
+                    self._adapt_partial_interval(elapsed)
                 else:
                     # 段落定稿：整句重译，挪入历史行
                     live.reset()
@@ -688,6 +780,7 @@ class Pipeline:
                         "kind": "final", "src": text,
                         "zh": zh if zh else tr("…翻译服务暂时不可用…"),
                     })
+                    self._stats.record(item_s=time.time() - t0)
                     log.info("识别 [%s]: %s → %s", lang, text, zh)
             except Exception as e:
                 log.exception("处理片段出错: %s", e)

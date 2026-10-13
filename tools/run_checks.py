@@ -502,6 +502,358 @@ def check_config_template():
     record("配置模板一致（内置默认 == config.example.yaml）", not diffs, "; ".join(diffs[:3]))
 
 
+# ---------------- 5d. 快照/定稿后端分级 + 冷却阶梯 ----------------
+
+
+def check_partial_backend():
+    ok, detail = True, []
+
+    def fail(msg):
+        nonlocal ok
+        ok = False
+        detail.append(msg)
+
+    from app.translator import COOLDOWN_LADDER_S, FallbackTranslator
+
+    class Fake:
+        partial_ok = True
+        partial_rank = 50
+
+        def __init__(self, name, result="译"):
+            self.name, self.result = name, result  # partial_rank 走类属性，别在实例上覆盖
+            self.calls = 0
+            self.partial_calls = 0
+
+        def translate(self, text, src_lang, target="zh", on_delta=None):
+            self.calls += 1
+            if isinstance(self.result, Exception):
+                raise self.result
+            return self.result
+
+        def translate_partial(self, text, src_lang, target="zh"):
+            self.partial_calls += 1
+            return self.translate(text, src_lang, target)
+
+        def close(self):
+            pass
+
+    class Big(Fake):
+        """大模型：整句排第一（用户就这么配的），快照排在有道之后。"""
+        context_sensitive = True
+        supports_stream = True
+        partial_rank = 10
+
+    class Quick(Fake):
+        partial_rank = 0
+
+    class Slow(Fake):
+        partial_rank = 20
+
+    class NoPartial(Fake):
+        partial_ok = False
+
+    big, quick, slow = Big("big", "大模型译文"), Quick("quick", "快译文"), Slow("slow", "兜底译文")
+    chain = FallbackTranslator([big, quick, slow])  # 配置顺序：大模型排第一
+    if chain.translate("整句定稿", "ja", "zh") != "大模型译文" or big.calls != 1:
+        fail("整句定稿应走配置顺序（大模型排第一就用大模型）")
+    if chain.translate_fast("半句快照", "ja", "zh") != "快译文" or quick.partial_calls != 1:
+        fail("快照应按 partial_rank 重排（先走快的后端，不看配置顺序）")
+    if big.partial_calls:
+        fail("快后端没被限流时不该动大模型")
+
+    # 快后端被限流 → 大模型顶上（而不是掉到最慢的 MyMemory）
+    quick.result = RuntimeError("有道返回异常: 请求频率过快 411")
+    chain2 = FallbackTranslator([big, quick, slow])
+    if chain2.translate_fast("半句快照", "ja", "zh") != "大模型译文" or big.partial_calls != 1:
+        fail("快后端限流时快照应落到大模型")
+    if slow.partial_calls:
+        fail("有快后端和大模型时不该掉到 MyMemory")
+
+    # 没登记 partial_rank 的后端保持用户配置的顺序（别把默认顺序里的 NLLB/MyMemory 颠倒）
+    seen_order = []
+
+    class Traced(Fake):
+        def translate_partial(self, text, src_lang, target="zh"):
+            seen_order.append(self.name)
+            raise RuntimeError("都没成，只看顺序")
+
+    try:
+        FallbackTranslator([Traced("a"), Traced("b"), Traced("c")]).translate_fast("半句", "ja", "zh")
+    except Exception:
+        pass
+    if seen_order != ["a", "b", "c"]:
+        fail(f"没排名的后端应保持配置顺序，实际 {seen_order}")
+
+    # 快照必须走 translate_partial 而不是 translate（后端要能区别对待）
+    class Marked(Fake):
+        partial_rank = 0
+
+        def translate(self, *a, **kw):
+            return "走了 translate（错）"
+
+        def translate_partial(self, text, src_lang, target="zh"):
+            self.partial_calls += 1
+            return "走了 translate_partial"
+
+    if FallbackTranslator([Marked("marked")]).translate_fast("半句", "ja", "zh") != "走了 translate_partial":
+        fail("快照没走 translate_partial（大模型那条不记上下文的约定会失效）")
+
+    # 全部后端都声明不吃快照时不能没译文：退回完整顺序
+    if FallbackTranslator([NoPartial("np", "整句译文")]).translate_fast("半句", "ja", "zh") != "整句译文":
+        fail("全是慢后端时应退回完整顺序，保证快照有译文")
+
+    from app.translator.llm_api import LlmApiTranslator
+    from app.translator.mymemory import MyMemoryTranslator
+    from app.translator.youdao_web import YoudaoWebTranslator
+
+    if not getattr(LlmApiTranslator, "partial_ok", False):
+        fail("LlmApiTranslator 应参与快照（排在有道之后）")
+    ranks = [YoudaoWebTranslator.partial_rank, LlmApiTranslator.partial_rank,
+             MyMemoryTranslator.partial_rank]
+    if ranks != sorted(ranks) or len(set(ranks)) != len(ranks):
+        fail(f"快照顺序应为 有道 < 大模型 < MyMemory，实际 {ranks}")
+
+    # 大模型的快照调用：不记上下文、用短超时（否则半句话会污染整句译文，
+    # 慢调用还会挡住下一次识别）
+    llm = LlmApiTranslator(base_url="https://example.invalid/v1", api_key="k",
+                           model="m", context_size=1)
+    seen = {}
+    llm._request = lambda text, target, on_delta, timeout: (
+        seen.update(timeout=timeout, on_delta=on_delta) or "译文")
+    if llm.translate_partial("半句快照", "ja", "zh") != "译文":
+        fail("大模型快照翻译没走到 _request")
+    if llm._history:
+        fail("快照翻译不该记进上下文历史（会污染后面的整句译文）")
+    if seen.get("timeout") != LlmApiTranslator.PARTIAL_TIMEOUT_S:
+        fail("快照该用更短的超时")
+    if seen.get("on_delta") is not None:
+        fail("快照不该走流式（半句话逐字上屏只会闪）")
+    llm.translate("整句定稿", "ja", "zh")
+    if len(llm._history) != 1:
+        fail("整句翻译应该记上下文")
+    if LlmApiTranslator.PARTIAL_TIMEOUT_S >= 8:
+        fail("快照超时应明显短于整句的 8 秒")
+
+    # main.py 的快照路径要真接上
+    with open(os.path.join(ROOT, "main.py"), encoding="utf-8") as f:
+        main_src = f.read()
+    if "def _fast_translate" not in main_src:
+        fail("main.py 里没有 _fast_translate")
+    if "LiveCaptionState(lambda t, lang: self._fast_translate" not in main_src:
+        fail("快照状态机没接 _fast_translate（分级不会生效）")
+
+    # 冷却阶梯：连续失败越等越久，成功即回到最短
+    f = Fake("f", RuntimeError("boom"))
+    ladder_chain = FallbackTranslator([f, Fake("g", "好")])
+    if ladder_chain._cooldown_s(f) != COOLDOWN_LADDER_S[0]:
+        fail("首次失败应只有最短冷却")
+    ladder_chain._mark_failed(f, time.time())
+    ladder_chain._mark_failed(f, time.time())
+    if ladder_chain._cooldown_s(f) != COOLDOWN_LADDER_S[1]:
+        fail("连续两次失败应升到第二档冷却")
+    for _ in range(5):
+        ladder_chain._mark_failed(f, time.time())
+    if ladder_chain._cooldown_s(f) != COOLDOWN_LADDER_S[-1]:
+        fail("连续失败应封顶在最长冷却")
+    ladder_chain._mark_ok(f)
+    if ladder_chain._cooldown_s(f) != COOLDOWN_LADDER_S[0]:
+        fail("成功之后冷却档位应清零")
+    if COOLDOWN_LADDER_S[-1] != 60:
+        fail("最长冷却应保持 60 秒（限流恢复时间实测约 65 秒）")
+
+    # 真实链路：失败后被跳过，冷却到点后重新启用
+    x = Fake("x", RuntimeError("boom"))
+    chain3 = FallbackTranslator([x, Fake("y", "好")])
+    if chain3.translate("一", "ja", "zh") != "好" or x.calls != 1:
+        fail("首个后端失败应回退到下一个")
+    chain3.translate("二", "ja", "zh")
+    if x.calls != 1:
+        fail("冷却期内不应再调用失败过的后端")
+    chain3._failed_at[x] = time.time() - COOLDOWN_LADDER_S[0] - 0.1
+    chain3.translate("三", "ja", "zh")
+    if x.calls != 2:
+        fail("冷却到点后应重新尝试该后端")
+
+    # 后端用量统计（统计行里的"翻译后端 xxx×N"）
+    chain4 = FallbackTranslator([Fake("u", "好")])
+    chain4.translate("甲", "ja", "zh")
+    chain4.translate("乙", "ja", "zh")
+    if chain4.take_usage().get("u") != 2:
+        fail(f"后端用量统计不准: {chain4.take_usage()}")
+    if chain4.take_usage():
+        fail("take_usage 之后应清零，日志里的数字才是本窗口的")
+
+    record("快照/定稿后端分级 + 冷却阶梯", ok, "; ".join(detail))
+
+
+# ---------------- 5e. 流水线统计日志 ----------------
+
+
+def check_pipeline_stats():
+    ok, detail = True, []
+
+    def fail(msg):
+        nonlocal ok
+        ok = False
+        detail.append(msg)
+
+    try:
+        import main as app_main
+    except ImportError as e:
+        record("流水线统计", True, f"跳过（本环境缺依赖 {getattr(e, 'name', e)}）")
+        return
+
+    class Translator:
+        def take_usage(self):
+            return app_main.Counter({"youdao_web": 3})
+
+    stats = app_main.PipelineStats()
+    stats.record(asr_s=0.5, item_s=0.6)
+    stats.record(asr_s=0.7, item_s=0.9)
+    stats.record_drop("实时快照")
+    stats.set_interval(1.5)
+    if stats.take_due(Translator()) is not None:
+        fail("没到窗口时间就不该输出统计")
+
+    stats._start -= app_main.PipelineStats.WINDOW_S + 1  # 把窗口推到到点
+    line = stats.take_due(Translator())
+    if not line:
+        fail("到点后应输出一行统计")
+    else:
+        for want in ("处理 2 条", "单条中位 0.75", "最慢 0.90", "识别中位 0.60",
+                     "丢弃 实时快照 1", "快照间隔 1.5s", "youdao_web×3"):
+            if want not in line:
+                fail(f"统计行缺少 {want!r}: {line}")
+    if stats.take_due(Translator()) is not None:
+        fail("输出后应重新计时，不重复输出同一窗口")
+
+    idle = app_main.PipelineStats()
+    idle._start -= app_main.PipelineStats.WINDOW_S + 1
+    if idle.take_due(Translator()) is not None:
+        fail("空闲窗口不该刷统计日志")
+
+    with open(os.path.join(ROOT, "main.py"), encoding="utf-8") as f:
+        src = f.read()
+    if "def _put_latest(self, q, item, kind)" not in src:
+        fail("_put_latest 应为实例方法（丢弃要进统计）")
+    if "self._stats.record_drop(kind)" not in src:
+        fail("丢弃时没计入统计（\"处理跟不上语速\"那条日志会看不见）")
+    if "self._stats.take_due(self._translator)" not in src:
+        fail("识别线程没有定期输出统计")
+
+    record("流水线统计（耗时/丢弃/后端用量）", ok, "; ".join(detail))
+
+
+def check_asr_repeat():
+    """识别复读：压缩比判据 + 重跑门槛 + 折叠兜底（真机日志里出过 600 字 21 遍的复读）。"""
+    ok, detail = True, []
+
+    def fail(msg):
+        nonlocal ok
+        ok = False
+        detail.append(msg)
+
+    from app.transcriber import DEGENERATE_RATIO, _compression_ratio, collapse_repeats
+
+    if not 2.0 < DEGENERATE_RATIO <= 3.0:
+        fail(f"压缩比阈值 {DEGENERATE_RATIO} 偏离 whisper 官方推荐区间")
+
+    # 真机日志里的两条复读（2026-10-12 22:34 / 22:36）：压缩比必须超阈值，
+    # 否则重跑不会触发；同时正常句子的压缩比要远低于阈值，别误触发
+    loops = [
+        "Where is it? " + "I don't think there is one. " * 21,
+        ("Rage my god, haha, that is the funniest joke I've heard all month Veedle. "
+         "There is absolutely no way that you are six feet four inches. ")
+        + "What's up guys? A little out of place, huh? " * 10,
+    ]
+    normal = "Well, I'm gonna be real with you guys. It doesn't really feel like a sleepover."
+    for t in loops:
+        if _compression_ratio(t) <= DEGENERATE_RATIO:
+            fail(f"复读文本压缩比 {_compression_ratio(t):.2f} 未超阈值，重跑不会触发")
+    if _compression_ratio(normal) > 1.5:
+        fail(f"正常句子压缩比偏高（{_compression_ratio(normal):.2f}），会误触发重跑")
+
+    # 折叠：复读留下 1 遍，去重遍数要报对
+    folded_text, folded = collapse_repeats(loops[0])
+    if folded != 20 or folded_text != "Where is it? I don't think there is one.":
+        fail(f"英文复读折叠不对：folded={folded} text={folded_text!r}")
+    _, folded2 = collapse_repeats(loops[1])
+    if folded2 != 9:
+        fail(f"长句复读折叠遍数不对：{folded2}")
+
+    # 不该误伤：强调式重复（2~4 遍）、单字重复、日语拟声词都应原样保留
+    for t in ["No no no no no no.",
+              "I don't know. I don't know. I don't know. I don't know.",
+              "ビリビリビリビリビリビリが生きている限り",
+              normal]:
+        out, n = collapse_repeats(t)
+        if n or out != t:
+            fail(f"不该折叠却被改了：{t!r} → {out!r}（{n} 遍）")
+
+    # 中文（无空格）复读走字符周期
+    zh_out, zh_n = collapse_repeats("今天天气真不错。" * 8)
+    if zh_n != 7 or zh_out != "今天天气真不错。":
+        fail(f"中文复读折叠不对：{zh_n} 遍 → {zh_out!r}")
+
+    # 中间复读、首尾保留
+    mid_out, mid_n = collapse_repeats("好的。" + "我知道了。" * 6 + "那就这样。")
+    if mid_n != 5 or mid_out != "好的。我知道了。那就这样。":
+        fail(f"中间复读折叠不对：{mid_out!r}（{mid_n} 遍）")
+
+    # 源码断言：重跑只由压缩比触发，且必须带上温度（否则重跑等于白跑）
+    with open(os.path.join(ROOT, "app", "transcriber.py"), encoding="utf-8") as f:
+        src = f.read()
+    for want in ("temperature=temperature", "RETRY_TEMPERATURE", "_compression_ratio(text)",
+                 "collapse_repeats(text)", "condition_on_previous_text=False"):
+        if want not in src:
+            fail(f"transcriber.py 缺少 {want!r}")
+    if "temperature=[0.0," in src or "temperature=[0," in src:
+        fail("别退回多级温度阶梯：默认那套 8 级会在嘈杂音频上连跑好几遍")
+
+    # 接线验证：拿假模型跑通 transcribe()，确认①正常语音只跑一遍（不多花时间）
+    # ②复读时才补跑 0.6 并采用重跑结果 ③重跑也压不住时交给折叠兜底
+    import numpy as np
+
+    from app.transcriber import Transcriber
+
+    class _Seg:
+        def __init__(self, text):
+            self.text = text
+
+    class _Info:
+        language = "en"
+        language_probability = 0.99
+
+    class _FakeModel:
+        def __init__(self, by_temperature):
+            self.by_temperature = by_temperature
+            self.calls = []
+
+        def transcribe(self, segment, **kw):
+            t = kw.get("temperature")
+            self.calls.append(t)
+            return [_Seg(self.by_temperature[t])], _Info()
+
+    def _run(mapping):
+        tr = Transcriber.__new__(Transcriber)  # 绕开模型加载，只测接线
+        tr.beam_size, tr.model = 1, _FakeModel(mapping)
+        return tr.transcribe(np.zeros(1600, dtype=np.float32)), tr.model.calls
+
+    (text, lang), calls = _run({0.0: normal})
+    if calls != [0.0] or text != normal:
+        fail(f"正常语音不该重跑：calls={calls} text={text!r}")
+
+    (text, lang), calls = _run({0.0: loops[0], 0.6: "Where is it? I don't think there is one."})
+    if calls != [0.0, 0.6] or text != "Where is it? I don't think there is one.":
+        fail(f"复读时应补跑 0.6 并采用其结果：calls={calls} text={text!r}")
+
+    (text, lang), calls = _run({0.0: loops[0], 0.6: loops[0]})
+    if calls != [0.0, 0.6] or text != "Where is it? I don't think there is one.":
+        fail(f"重跑仍复读时应折叠兜底：calls={calls} text={text!r}")
+
+    record("识别复读（压缩比判据/重跑/折叠兜底）", ok, "; ".join(detail))
+
+
 # ---------------- 6. 包型识别与选包 ----------------
 
 CPU_NAME = "realtime-translate-subtitles-v9.9.9-windows-x64.zip"
@@ -1768,6 +2120,7 @@ def main():
     # 一次性看全所有问题，而不是修一个跑一次
     for fn in (check_syntax, check_updater, check_translator, check_llm_context,
                check_live_caption, check_snapshot_pacing, check_config_template,
+               check_partial_backend, check_pipeline_stats, check_asr_repeat,
                check_flavor, check_packaging, check_download_channels,
                check_model_download, check_glossary, check_audio_level,
                check_av_stub, check_i18n, check_ocr_lang):

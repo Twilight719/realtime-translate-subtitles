@@ -36,6 +36,7 @@ _HEADERS = {
 
 class GoogleWebTranslator(Translator):
     name = "google_web"
+    partial_rank = 5  # 和有道一样快且免费（能不能用取决于网络）
 
     def __init__(self, timeout=8):
         self.timeout = timeout

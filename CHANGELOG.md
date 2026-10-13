@@ -6,6 +6,22 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.4.2] - 2026-10-13
+
+### 修复 / Fixed
+
+- **识别不再"卡带"复读**：偶尔会把同一句话重复识别几十遍（实测约一百句里有一两句），字幕条上刷出一大段重复文字。现在软件会自己察觉这种异常、换一种解码方式重跑一遍；万一还有残留，也会把连续重复的部分折叠成一遍。
+  Speech recognition no longer gets stuck repeating one sentence dozens of times (it used to hit roughly 1-2 sentences out of 100 and flood the caption bar). The app now detects the anomaly and retries with a different decoding setting, and folds away any repetition that survives.
+
+### 优化 / Changed
+
+- **浅色快照更跟手**：实时字幕里颜色较浅、还会变动的那半句（"快照"）之前和整句定稿走同一套后端顺序，排在前面的慢后端会拖慢它。现在快照单独按"跟手"排一遍——有道 → 大模型 API → MyMemory，整句定稿仍走你在设置里排的完整顺序。也就是说，把「大模型 API」放第一位 = 定稿最准，快照照样跟手；没填 API Key 的话这一步自动跳过，行为不变。
+  The dim "snapshot" half-sentence in the live caption now uses its own responsiveness-first backend order - Youdao -> LLM API -> MyMemory - while finalized sentences keep the full order you configured. Putting "LLM API" first gives you the most accurate final text while snapshots stay snappy; without an API key the LLM step is simply skipped.
+- **翻译失败后恢复更快**：以前某个后端失败一次就被静默 60 秒，这段时间全靠备用后端硬扛（字幕可能又慢又不准）。现在改成 5 秒 → 20 秒 → 60 秒的阶梯：网络抖一下就恢复，真的被限流才逐步拉开距离，成功一次就清零。
+  A failed translation backend now backs off 5 -> 20 -> 60 seconds instead of a flat 60-second timeout: a brief network hiccup recovers quickly, while genuine rate-limiting still backs off as needed.
+
+---
+
 ## [v1.4.1] - 2026-10-11
 
 ### 修复 / Fixed

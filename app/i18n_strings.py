@@ -260,6 +260,13 @@ MAP = {
     "后端优先级：排最上面的先用，失败或限流时自动切换到下一个，全部失败会稍后自动恢复重试。":
         "Backend priority: the topmost is used first; on failure or rate-limiting it "
         "automatically falls back to the next, and recovers automatically later if all fail.",
+    "实时字幕里颜色较浅、还会变动的那半句是“快照”，它按“跟手”单独排一遍：有道 → 大模型 API（没填 Key 时这步自动跳过）→ MyMemory（有道最快最省，它被限流时大模型顶上，大模型比 MyMemory 还快）；整句定稿才走上面的完整顺序。所以把“大模型 API”放第一位 = 定稿最准，快照照样跟手。":
+        "In the live caption, the dimmer half-sentence that keeps changing is a \"snapshot\": "
+        "it uses its own order tuned for responsiveness — Youdao → LLM API (skipped when no API "
+        "key is set) → MyMemory. Youdao is fastest and free; when it gets rate-limited the LLM API "
+        "takes over (still faster than MyMemory). Only finalized sentences follow the full order "
+        "above. So putting \"LLM API\" first gives you the most accurate final text while snapshots "
+        "stay responsive.",
     "有道翻译：免 key、国内直连，速度快，但只支持“外语 ↔ 中文”。":
         "Youdao Translate: no key, direct connection in China, fast — but only supports "
         "\"foreign language ↔ Chinese\".",
