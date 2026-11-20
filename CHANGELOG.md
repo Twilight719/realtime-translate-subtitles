@@ -6,6 +6,17 @@ All notable changes to this project are documented here, following [Keep a Chang
 
 ---
 
+## [v1.4.3] - 2026-10-13
+
+### 新增 / Added
+
+- **新增 B站 Index-Translate 免费翻译后端**：设置 → 翻译服务 → 后端优先级里勾选「Index-Translate（B站，在线）」即可使用。官方免费 API、无需填 key、国内直连，实测日→中约 0.8 秒返回，支持流式输出和术语表；番剧/游戏的口语和梗翻译质量好。可作为 DeepSeek 之外的免费选择或备用兜底。
+  New free translation backend: Bilibili's official Index-Translate API (Settings → Translation Services). No API key needed, direct connection in China, ~0.8s for a Japanese sentence, streaming and glossary supported. A free alternative or fallback to DeepSeek, with strong anime/game translation quality.
+- **截图翻译新增「看图直翻」模式**：设置 → 字幕外观 → 截图翻译弹窗 → 识别方式 → B站看图直翻。截图直接发给多模态模型识别并翻译（不再先 OCR），对漫画竖排文字、艺术字、复杂排版明显更准；仍支持双语/仅译文/仅原文显示。识别失败会自动回退到本地 OCR，离线时也可切回本地模式。
+  New "vision translation" mode for screenshot translation (Settings → Subtitle Appearance → popup → Recognition Method): the image is sent directly to a multimodal model instead of OCR first — noticeably better on vertical manga text, stylized fonts and complex layouts. Falls back to local OCR automatically on failure; local OCR remains available offline.
+
+---
+
 ## [v1.4.2] - 2026-10-13
 
 ### 修复 / Fixed

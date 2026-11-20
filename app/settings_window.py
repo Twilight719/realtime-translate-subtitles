@@ -285,6 +285,7 @@ def make_help_widget(lines):
 
 BACKENDS = {
     "youdao_web": (tr("有道翻译（在线）"), tr("国内直连，无需 key，质量良好")),
+    "index_api": (tr("Index-Translate（B站，在线）"), tr("官方免费 API，无需 key，番剧/游戏语境质量好")),
     "mymemory": (tr("MyMemory（在线）"), tr("免费无需 key，备用")),
     "google_web": (tr("Google 翻译（在线）"), tr("需要能访问 Google 的网络")),
     "llm_api": (tr("大模型 API"), tr("DeepSeek/豆包/GPT 等，口语质量最好，需填 key")),
@@ -664,6 +665,13 @@ class SettingsWindow(QMainWindow):
         idx = self.combo_ocr_display.findData(o.get("display_mode", "both"))
         self.combo_ocr_display.setCurrentIndex(max(0, idx))
         of.addRow(tr("弹窗内容"), self.combo_ocr_display)
+        self.combo_ocr_mode = QComboBox()
+        for code, name in [("ocr", tr("本地 OCR（离线可用）")),
+                           ("vision", tr("B站看图直翻（在线，竖排/艺术字更准）"))]:
+            self.combo_ocr_mode.addItem(name, code)
+        idx = self.combo_ocr_mode.findData(o.get("mode", "ocr"))
+        self.combo_ocr_mode.setCurrentIndex(max(0, idx))
+        of.addRow(tr("识别方式"), self.combo_ocr_mode)
         ocr_hint = QLabel(tr("弹窗显示在框选区域附近；停留时长填 0 表示不自动关闭（点击弹窗关闭）。"))
         ocr_hint.setObjectName("hint")
         ocr_hint.setWordWrap(True)
@@ -1579,6 +1587,7 @@ class SettingsWindow(QMainWindow):
         ocr["font_size"] = self.spin_ocr_font.value()
         ocr["bg_alpha"] = self.spin_ocr_alpha.value()
         ocr["display_mode"] = self.combo_ocr_display.currentData()
+        ocr["mode"] = self.combo_ocr_mode.currentData()
 
         audio = cfg.get("audio")
         if audio is None:

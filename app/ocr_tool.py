@@ -44,6 +44,51 @@ def clean_cjk_spacing(text):
     return _CJK_SPACE.sub("", text)
 
 
+def vision_translate_image(image_path, src_lang=None, target="zh", timeout=30):
+    """B站 Index-Translate 多模态看图直翻：直接把截图发给模型，零 OCR 依赖。
+
+    对竖排文字/艺术字/漫画气泡明显优于本地 OCR + 文本翻译。需要联网。
+    返回 (原文, 译文)；失败抛异常，调用方应回退到本地 OCR 流程。
+    """
+    import base64
+
+    import requests
+
+    target_names = {"zh": "简体中文", "en": "英语", "ja": "日语", "ko": "韩语", "ru": "俄语"}
+    src_names = {"zh": "中文", "en": "英语", "ja": "日语", "ko": "韩语", "ru": "俄语"}
+    src_hint = f"（原文为{src_names[src_lang]}）" if src_lang in src_names else ""
+    prompt = (
+        f"请识别图片中的文字{src_hint}，并翻译为{target_names.get(target, '简体中文')}。\n"
+        "严格按以下格式输出，不要输出任何其他内容：\n"
+        "【原文】\n<识别出的全部原文，按阅读顺序拼接成一段>\n"
+        "【译文】\n<对应的完整译文>"
+    )
+    with open(image_path, "rb") as f:
+        b64 = base64.b64encode(f.read()).decode("ascii")
+    payload = {
+        "model": "Index-Translate-35B-A3B",
+        "messages": [{
+            "role": "user",
+            "content": [
+                {"type": "text", "text": prompt},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{b64}"}},
+            ],
+        }],
+    }
+    resp = requests.post(
+        "https://index-translate.bilibili.com/v1/chat/completions",
+        json=payload, timeout=timeout,
+        headers={"User-Agent": "Index-Translate-Client/1.0"},
+    )
+    resp.raise_for_status()
+    content = resp.json()["choices"][0]["message"]["content"].strip()
+    if "【译文】" in content:
+        src_part, zh = content.split("【译文】", 1)
+        src = src_part.replace("【原文】", "").strip()
+        return src, zh.strip()
+    return "", content  # 模型没按格式输出时，全文当译文
+
+
 def available_ocr_languages():
     from winsdk.windows.media.ocr import OcrEngine
 

@@ -31,6 +31,9 @@ MAP = {
         "DeepSeek/Doubao/GPT etc., best colloquial quality, API key required",
     "NLLB 本地模型": "NLLB Local Model",
     "离线兜底，无需网络，速度较慢": "Offline fallback, no network needed, slower",
+    "Index-Translate（B站，在线）": "Index-Translate (Bilibili, online)",
+    "官方免费 API，无需 key，番剧/游戏语境质量好":
+        "Official free API, no key needed, great for anime/game language",
 
     # ---------- settings_window.py · 窗口与侧边栏 ----------
     "实时翻译字幕 · 设置 v{ver}": "Realtime Translate Subtitles · Settings v{ver}",
@@ -115,6 +118,10 @@ MAP = {
     "弹窗字号": "Popup Font Size",
     "弹窗背景不透明度": "Popup Background Opacity",
     "弹窗内容": "Popup Content",
+    "识别方式": "Recognition Method",
+    "本地 OCR（离线可用）": "Local OCR (works offline)",
+    "B站看图直翻（在线，竖排/艺术字更准）":
+        "Bilibili vision translation (online; better for vertical/stylized text)",
     "弹窗显示在框选区域附近；停留时长填 0 表示不自动关闭（点击弹窗关闭）。":
         "The popup appears near the selected area; set the duration to 0 to keep it "
         "open until clicked.",

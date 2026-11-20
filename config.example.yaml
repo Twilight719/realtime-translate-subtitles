@@ -27,7 +27,8 @@ language:
 
 translator:
   order:                               # 排前面优先，失败自动回退下一个
-                                      # 可选 youdao_web / mymemory / google_web / llm_api / nllb
+                                      # 可选 youdao_web / index_api / mymemory / google_web / llm_api / nllb
+                                      # index_api = B站 Index-Translate 官方免费 API，无需 key
                                       # google_web 需要能访问 Google 的网络
   - youdao_web
   - nllb
@@ -60,6 +61,7 @@ ocr:
   duration_ms: 8000        # 截图翻译弹窗停留毫秒数（0=不自动关闭，点击关闭）
   font_size: 15            # 弹窗字号
   bg_alpha: 235            # 弹窗背景不透明度（0~255）
+  mode: ocr                # ocr=本地 OCR（离线可用）；vision=B站看图直翻（在线，竖排/艺术字更准）
 
 ui:
   font_size: 13            # 设置界面字体大小（10~22），改大后窗口可手动拉大

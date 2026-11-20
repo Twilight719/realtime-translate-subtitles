@@ -7,6 +7,7 @@ from collections import Counter, OrderedDict
 
 from .base import Translator, TranslationTextError
 from .google_web import GoogleWebTranslator
+from .index_api import IndexApiTranslator
 from .llm_api import LlmApiTranslator
 from .mymemory import MyMemoryTranslator
 from .nllb import NllbTranslator
@@ -30,6 +31,8 @@ def build_chain(cfg):
         try:
             if name == "youdao_web":
                 backends.append(YoudaoWebTranslator())
+            elif name == "index_api":
+                backends.append(IndexApiTranslator(glossary=cfg.get("glossary")))
             elif name == "mymemory":
                 backends.append(MyMemoryTranslator())
             elif name == "google_web":

@@ -1016,6 +1016,20 @@ class MainApp:
                                   ocr_image_multi, pack_missing, pick_ocr_language)
 
         try:
+            # 看图直翻模式：整图发给多模态模型，零 OCR 依赖；失败自动回退本地 OCR
+            if (self.cfg.get("ocr") or {}).get("mode", "ocr") == "vision":
+                try:
+                    from app.ocr_tool import vision_translate_image
+
+                    src_v, zh_v = vision_translate_image(
+                        path, None if src_lang == "auto" else src_lang, target
+                    )
+                    if src_v or zh_v:
+                        log.info("看图直翻 [%s]: %s → %s", src_lang, src_v, zh_v)
+                        self.bridge.ocr_result.emit({"src": src_v, "zh": zh_v, "anchor": rect})
+                        return
+                except Exception as e:
+                    log.warning("看图直翻失败，回退本地 OCR: %s", e)
             notice, notice_once = "", ""
             if src_lang == "auto":
                 # 自动检测：系统默认引擎 + 已装的中/日/韩/俄引擎各识别一遍再挑
